@@ -46,12 +46,21 @@ class AuthService:
             if user is None:
                 session.add(User(username=username, password_hash=hash_password(password)))
                 session.commit()
+            elif not verify_password(password, user.password_hash):
+                user.password_hash = hash_password(password)
+                for record in session.scalars(select(SessionRecord).where(SessionRecord.user_id == user.id)):
+                    record.revoked_at = utcnow()
+                session.commit()
 
     def ensure_agent(self, token: str, name: str = "jarvis") -> None:
         with self.session_factory() as session:
             credential = session.scalar(select(AgentCredential).where(AgentCredential.name == name))
             if credential is None:
                 session.add(AgentCredential(name=name, token_hash=hash_token(token)))
+                session.commit()
+            elif not hmac.compare_digest(credential.token_hash, hash_token(token)):
+                credential.token_hash = hash_token(token)
+                credential.revoked_at = None
                 session.commit()
 
     def create_session(self, username: str, password: str) -> tuple[str, bool]:
