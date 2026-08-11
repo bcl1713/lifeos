@@ -37,6 +37,7 @@ def test_scheduler_lifespan_starts_and_stops_cleanly(tmp_path) -> None:
         scheduler_interval_seconds=1,
     )
     with TestClient(app):
+        assert app.state.scheduler_timezone == "America/Chicago"
         assert app.state.scheduler_task is not None
         assert not app.state.scheduler_task.done()
     assert app.state.scheduler_task.done()

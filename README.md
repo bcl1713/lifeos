@@ -9,7 +9,7 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - `/healthz` is public.
 - `/auth/login`, `/auth/logout`, `/auth/me`, and agent bearer authentication are available.
 - Tasks, task lists, goals, projects, and routines have SQLite-backed CRUD APIs.
-- Active routines generate idempotent concrete task occurrences through the in-container scheduler.
+- Active routines generate idempotent concrete task occurrences through the in-container scheduler, using `America/Chicago` by default.
 
 - Source repository: `bcl1713/lifeos`
 - Deployment repository: `bcl1713/homelab-stacks`

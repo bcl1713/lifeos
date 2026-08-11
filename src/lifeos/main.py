@@ -56,7 +56,7 @@ def create_app(
     app.state.engine = engine
     app.state.auth = auth
     app.state.session_factory = session_factory
-    app.state.scheduler_timezone = os.getenv("LIFEOS_TIMEZONE", "UTC")
+    app.state.scheduler_timezone = os.getenv("LIFEOS_TIMEZONE", "America/Chicago")
     app.state.scheduler_interval_seconds = scheduler_interval_seconds
     app.include_router(context_router)
     app.include_router(task_router)
