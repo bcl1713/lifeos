@@ -36,3 +36,30 @@ def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
     assert [task["due_date"] for task in tasks] == ["2026-08-11", "2026-08-12", "2026-08-13"]
     assert all(task["routine_id"] == routine_id for task in tasks)
     assert client.get("/api/routines").json()[0]["next_run_date"] == "2026-08-14"
+
+
+def test_generate_all_routines_processes_active_routines_once(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    for title in ("Feed pets", "Review calendar"):
+        response = client.post(
+            "/api/routines",
+            json={
+                "title": title,
+                "cadence": "daily",
+                "task_list_id": task_list["id"],
+                "start_date": "2026-08-13",
+            },
+        )
+        assert response.status_code == 201
+
+    generated = client.post("/api/routines/generate", params={"on": "2026-08-13"})
+    assert generated.status_code == 200
+    assert generated.json()["generated"] == 2
+    assert client.post("/api/routines/generate", params={"on": "2026-08-13"}).json()["generated"] == 0

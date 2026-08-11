@@ -52,3 +52,8 @@ def generate_routine_tasks(session: Session, routine: Routine, through: date, ac
         routine.next_run_date = advance_occurrence(occurrence, routine.cadence)
     session.commit()
     return generated
+
+
+def generate_all_routines(session: Session, through: date, actor: str) -> int:
+    routines = session.scalars(select(Routine).where(Routine.status == "active").order_by(Routine.id))
+    return sum(generate_routine_tasks(session, routine, through, actor) for routine in routines)

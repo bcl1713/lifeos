@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from lifeos.domain import Goal, Project, Routine, TaskList
-from lifeos.routine_service import generate_routine_tasks
+from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
 router = APIRouter(prefix="/api")
@@ -147,6 +147,19 @@ def create_routine(
     session.commit()
     session.refresh(routine)
     return _resource(routine)
+
+
+@router.post("/routines/generate")
+def generate_all(
+    on: date | None = Query(default=None),
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, int]:
+    try:
+        generated = generate_all_routines(session, on or date.today(), actor)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"generated": generated}
 
 
 @router.patch("/routines/{routine_id}")
