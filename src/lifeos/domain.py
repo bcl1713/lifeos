@@ -139,6 +139,37 @@ class Task(Base):
     children: Mapped[list["Task"]] = relationship(back_populates="parent")
 
 
+class MetricDefinition(Base):
+    __tablename__ = "metric_definitions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    slug: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    label: Mapped[str] = mapped_column(String(200), nullable=False)
+    data_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    unit: Mapped[Optional[str]] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    entries: Mapped[list["MetricEntry"]] = relationship(back_populates="metric", cascade="all, delete-orphan")
+
+
+class MetricEntry(Base):
+    __tablename__ = "metric_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    metric_id: Mapped[int] = mapped_column(ForeignKey("metric_definitions.id", ondelete="CASCADE"), nullable=False)
+    recorded_on: Mapped[date] = mapped_column(Date, nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[Optional[str]] = mapped_column(String(300))
+    estimated: Mapped[bool] = mapped_column(default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    metric: Mapped[MetricDefinition] = relationship(back_populates="entries")
+
+
 class AuditRecord(Base):
     __tablename__ = "audit_records"
 

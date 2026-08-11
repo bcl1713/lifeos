@@ -7,6 +7,7 @@ from lifeos import __version__
 from lifeos.auth import AuthService
 from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
+from lifeos.metric_api import router as metric_router
 from lifeos.scheduler import scheduler_lifespan
 from lifeos.source_api import router as source_router
 from lifeos.task_api import router as task_router
@@ -62,6 +63,7 @@ def create_app(
     app.state.scheduler_interval_seconds = scheduler_interval_seconds
     app.include_router(context_router)
     app.include_router(task_router)
+    app.include_router(metric_router)
     app.include_router(source_router)
     app.include_router(ui_router)
 

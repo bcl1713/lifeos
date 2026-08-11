@@ -1,12 +1,13 @@
+import json
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import Goal, Project, Routine, TaskList
+from lifeos.domain import AuditRecord, Goal, Project, Routine, TaskList
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
@@ -19,7 +20,7 @@ class GoalCreate(BaseModel):
 
 class GoalUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
-    status: str | None = Field(default=None, min_length=1, max_length=30)
+    status: Literal["not_started", "active", "blocked", "paused", "completed", "abandoned"] | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -29,7 +30,7 @@ class ProjectCreate(BaseModel):
 
 class ProjectUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
-    status: str | None = Field(default=None, min_length=1, max_length=30)
+    status: Literal["active", "blocked", "paused", "completed", "abandoned", "archived"] | None = None
     goal_id: int | None = None
 
 
@@ -44,7 +45,7 @@ class RoutineCreate(BaseModel):
 class RoutineUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     cadence: str | None = Field(default=None, min_length=1, max_length=50)
-    status: str | None = Field(default=None, min_length=1, max_length=30)
+    status: Literal["active", "paused", "archived"] | None = None
     task_list_id: int | None = None
     goal_id: int | None = None
 
@@ -59,6 +60,20 @@ def _resource(resource: Any) -> dict[str, Any]:
     return values
 
 
+def _audit(
+    session: Session, entity_type: str, entity_id: int, action: str, actor: str, payload: dict[str, Any]
+) -> None:
+    session.add(
+        AuditRecord(
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action=action,
+            actor=actor,
+            payload=json.dumps(payload, sort_keys=True),
+        )
+    )
+
+
 @router.get("/goals")
 def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
     return [_resource(goal) for goal in session.scalars(select(Goal).order_by(Goal.id))]
@@ -66,10 +81,12 @@ def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_
 
 @router.post("/goals", status_code=status.HTTP_201_CREATED)
 def create_goal(
-    payload: GoalCreate, _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+    payload: GoalCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     goal = Goal(title=payload.title.strip())
     session.add(goal)
+    session.flush()
+    _audit(session, "goal", goal.id, "created", actor, {"title": goal.title})
     session.commit()
     session.refresh(goal)
     return _resource(goal)
@@ -77,13 +94,14 @@ def create_goal(
 
 @router.patch("/goals/{goal_id}")
 def update_goal(
-    goal_id: int, payload: GoalUpdate, _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+    goal_id: int, payload: GoalUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     goal = session.get(Goal, goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(goal, field, value.strip() if isinstance(value, str) and field == "title" else value)
+    _audit(session, "goal", goal.id, "updated", actor, payload.model_dump(exclude_unset=True))
     session.commit()
     session.refresh(goal)
     return _resource(goal)
@@ -96,11 +114,13 @@ def list_projects(_actor: str = Depends(get_actor), session: Session = Depends(g
 
 @router.post("/projects", status_code=status.HTTP_201_CREATED)
 def create_project(
-    payload: ProjectCreate, _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+    payload: ProjectCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     _require_goal(session, payload.goal_id)
     project = Project(title=payload.title.strip(), goal_id=payload.goal_id)
     session.add(project)
+    session.flush()
+    _audit(session, "project", project.id, "created", actor, {"title": project.title, "goal_id": project.goal_id})
     session.commit()
     session.refresh(project)
     return _resource(project)
@@ -108,7 +128,7 @@ def create_project(
 
 @router.patch("/projects/{project_id}")
 def update_project(
-    project_id: int, payload: ProjectUpdate, _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+    project_id: int, payload: ProjectUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     project = session.get(Project, project_id)
     if project is None:
@@ -117,6 +137,7 @@ def update_project(
     _require_goal(session, changes.get("goal_id", project.goal_id))
     for field, value in changes.items():
         setattr(project, field, value.strip() if isinstance(value, str) and field == "title" else value)
+    _audit(session, "project", project.id, "updated", actor, changes)
     session.commit()
     session.refresh(project)
     return _resource(project)
@@ -130,7 +151,7 @@ def list_routines(_actor: str = Depends(get_actor), session: Session = Depends(g
 @router.post("/routines", status_code=status.HTTP_201_CREATED)
 def create_routine(
     payload: RoutineCreate,
-    _actor: str = Depends(get_actor),
+    actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     _require_goal(session, payload.goal_id)
@@ -144,6 +165,8 @@ def create_routine(
         goal_id=payload.goal_id,
     )
     session.add(routine)
+    session.flush()
+    _audit(session, "routine", routine.id, "created", actor, {"title": routine.title, "cadence": routine.cadence})
     session.commit()
     session.refresh(routine)
     return _resource(routine)
@@ -164,7 +187,7 @@ def generate_all(
 
 @router.patch("/routines/{routine_id}")
 def update_routine(
-    routine_id: int, payload: RoutineUpdate, _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+    routine_id: int, payload: RoutineUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     routine = session.get(Routine, routine_id)
     if routine is None:
@@ -175,6 +198,7 @@ def update_routine(
         raise HTTPException(status_code=404, detail="Task list not found")
     for field, value in changes.items():
         setattr(routine, field, value.strip() if isinstance(value, str) and field in {"title", "cadence"} else value)
+    _audit(session, "routine", routine.id, "updated", actor, changes)
     session.commit()
     session.refresh(routine)
     return _resource(routine)

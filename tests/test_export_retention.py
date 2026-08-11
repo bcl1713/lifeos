@@ -3,6 +3,7 @@ import json
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.domain import Task, TaskList
 from scripts.export_lifeos import export_database
+from scripts.restore_lifeos import restore_database
 from scripts.retain_lifeos_backups import retention_plan
 
 
@@ -34,3 +35,24 @@ def test_retention_keeps_latest_daily_and_monthly_backups(tmp_path) -> None:
         "lifeos-20260731T120000Z.db",
     }
     assert [path.name for path in remove] == ["lifeos-20250601T120000Z.db", "lifeos-20260701T120000Z.db"]
+
+
+def test_restore_round_trip_preserves_task_and_audit_counts(tmp_path) -> None:
+    source = tmp_path / "source.db"
+    backup = tmp_path / "backup.db"
+    restored = tmp_path / "restored.db"
+    engine = create_engine(f"sqlite:///{source}")
+    initialize_database(engine)
+    with create_session_factory(engine)() as session:
+        task_list = TaskList(name="Inbox")
+        session.add(task_list)
+        session.flush()
+        session.add(Task(title="Restore me", task_list_id=task_list.id))
+        session.commit()
+    from scripts.backup_lifeos import backup_database
+
+    backup_database(source, backup)
+    restore_database(backup, restored)
+    with create_session_factory(create_engine(f"sqlite:///{restored}"))() as session:
+        assert session.query(Task).count() == 1
+        assert session.query(TaskList).count() == 1

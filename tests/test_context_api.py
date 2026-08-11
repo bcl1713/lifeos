@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from lifeos.domain import AuditRecord
 from lifeos.main import create_app
 
 
@@ -56,6 +57,11 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
     assert client.get("/api/goals").json()[0]["title"] == "Keep the household running"
     assert client.get("/api/projects").json()[0]["goal_id"] == goal_id
     assert client.get("/api/routines").json()[0]["cadence"] == "weekly"
+    with app.state.session_factory() as session:
+        assert (
+            session.query(AuditRecord).filter(AuditRecord.entity_type.in_(["goal", "project", "routine"])).count() >= 4
+        )
+    assert client.patch(f"/api/goals/{goal_id}", json={"status": "made-up"}).status_code == 422
 
 
 def test_context_resources_require_authentication(tmp_path) -> None:

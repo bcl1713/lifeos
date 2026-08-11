@@ -17,6 +17,8 @@ REQUIRED_TABLES = {
     "projects",
     "routines",
     "audit_records",
+    "metric_definitions",
+    "metric_entries",
 }
 
 

@@ -7,7 +7,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskList, utcnow
+from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -301,6 +301,8 @@ def data_page(
         "goals": session.scalar(select(func.count()).select_from(Goal)) or 0,
         "projects": session.scalar(select(func.count()).select_from(Project)) or 0,
         "routines": session.scalar(select(func.count()).select_from(Routine)) or 0,
+        "metrics": session.scalar(select(func.count()).select_from(MetricDefinition)) or 0,
+        "metric_entries": session.scalar(select(func.count()).select_from(MetricEntry)) or 0,
         "audit": session.scalar(select(func.count()).select_from(AuditRecord)) or 0,
     }
     audits = list(session.scalars(select(AuditRecord).order_by(AuditRecord.id.desc()).limit(20)))
