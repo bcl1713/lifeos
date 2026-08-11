@@ -44,6 +44,7 @@ def test_backup_restores_task_and_audit_history(tmp_path) -> None:
         "metric_entries": 0,
         "routine_skips": 0,
         "goal_milestones": 0,
+        "task_dependencies": 0,
     }
     engine = create_engine(f"sqlite:///{restored}")
     with create_session_factory(engine)() as session:

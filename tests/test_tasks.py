@@ -120,6 +120,36 @@ def test_task_listing_supports_status_filter_and_pagination(tmp_path) -> None:
     assert len(client.get("/api/tasks", params={"limit": 1, "offset": 1}).json()) == 1
 
 
+def test_task_dependencies_are_idempotent_and_reject_cycles(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    tasks = [
+        client.post("/api/tasks", json={"title": title, "task_list_id": list_id}).json() for title in ("A", "B", "C")
+    ]
+    a, b, c = (task["id"] for task in tasks)
+    first = client.post(f"/api/tasks/{a}/dependencies", json={"depends_on_task_id": b})
+    assert first.status_code == 201
+    duplicate = client.post(f"/api/tasks/{a}/dependencies", json={"depends_on_task_id": b})
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == first.json()["id"]
+    assert client.post(f"/api/tasks/{b}/dependencies", json={"depends_on_task_id": c}).status_code == 201
+    assert client.post(f"/api/tasks/{c}/dependencies", json={"depends_on_task_id": a}).status_code == 409
+    assert client.post(f"/api/tasks/{a}/dependencies", json={"depends_on_task_id": a}).status_code == 409
+    assert client.get(f"/api/tasks/{a}/dependencies").json()[0]["depends_on_task_id"] == b
+    assert client.delete(f"/api/tasks/{a}/dependencies/{first.json()['id']}").status_code == 204
+    assert client.get(f"/api/tasks/{a}/dependencies").json() == []
+    assert [entry["action"] for entry in client.get(f"/api/tasks/{a}/audit").json()][-2:] == [
+        "dependency_added",
+        "dependency_removed",
+    ]
+
+
 def test_task_creation_rejects_missing_related_resources(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",

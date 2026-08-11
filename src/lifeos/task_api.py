@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskList, utcnow
+from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskDependency, TaskList, utcnow
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +43,10 @@ class TaskUpdate(BaseModel):
     project_id: int | None = None
     routine_id: int | None = None
     parent_id: int | None = None
+
+
+class TaskDependencyCreate(BaseModel):
+    depends_on_task_id: int
 
 
 def get_session(request: Request):
@@ -251,6 +255,92 @@ def _set_task_status(session: Session, *, task_id: int, status_value: str, actio
     session.commit()
     session.refresh(task)
     return serialize_task(task)
+
+
+def _dependency_resource(item: TaskDependency) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "task_id": item.task_id,
+        "depends_on_task_id": item.depends_on_task_id,
+        "created_at": item.created_at,
+    }
+
+
+def _would_create_cycle(session: Session, task_id: int, depends_on_task_id: int) -> bool:
+    seen: set[int] = set()
+    pending = [depends_on_task_id]
+    while pending:
+        current = pending.pop()
+        if current == task_id:
+            return True
+        if current in seen:
+            continue
+        seen.add(current)
+        pending.extend(
+            session.scalars(select(TaskDependency.depends_on_task_id).where(TaskDependency.task_id == current))
+        )
+    return False
+
+
+@router.get("/tasks/{task_id}/dependencies")
+def list_dependencies(
+    task_id: int,
+    _actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    if session.get(Task, task_id) is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return [
+        _dependency_resource(item)
+        for item in session.scalars(
+            select(TaskDependency).where(TaskDependency.task_id == task_id).order_by(TaskDependency.id)
+        )
+    ]
+
+
+@router.post("/tasks/{task_id}/dependencies", status_code=status.HTTP_201_CREATED)
+def add_dependency(
+    task_id: int,
+    payload: TaskDependencyCreate,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if session.get(Task, task_id) is None or session.get(Task, payload.depends_on_task_id) is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task_id == payload.depends_on_task_id or _would_create_cycle(session, task_id, payload.depends_on_task_id):
+        raise HTTPException(status_code=409, detail="Task dependency would create a cycle")
+    existing = session.scalar(
+        select(TaskDependency).where(
+            TaskDependency.task_id == task_id,
+            TaskDependency.depends_on_task_id == payload.depends_on_task_id,
+        )
+    )
+    if existing is not None:
+        return _dependency_resource(existing)
+    item = TaskDependency(task_id=task_id, depends_on_task_id=payload.depends_on_task_id)
+    session.add(item)
+    session.flush()
+    add_audit(session, task_id=task_id, action="dependency_added", actor=actor, payload=payload.model_dump())
+    session.commit()
+    session.refresh(item)
+    return _dependency_resource(item)
+
+
+@router.delete("/tasks/{task_id}/dependencies/{dependency_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_dependency(
+    task_id: int,
+    dependency_id: int,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> None:
+    item = session.get(TaskDependency, dependency_id)
+    if item is None or item.task_id != task_id:
+        raise HTTPException(status_code=404, detail="Dependency not found")
+    session.delete(item)
+    add_audit(
+        session, task_id=task_id, action="dependency_removed", actor=actor, payload={"dependency_id": dependency_id}
+    )
+    session.commit()
 
 
 @router.get("/tasks/{task_id}/audit")
