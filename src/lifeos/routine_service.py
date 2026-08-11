@@ -5,7 +5,7 @@ from datetime import date, timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Routine, Task
+from lifeos.domain import AuditRecord, Routine, RoutineSkip, Task
 
 
 def advance_occurrence(value: date, cadence: str) -> date:
@@ -26,8 +26,17 @@ def generate_routine_tasks(session: Session, routine: Routine, through: date, ac
     while routine.status == "active" and routine.next_run_date <= through:
         occurrence = routine.next_run_date
         occurrence_key = f"routine:{routine.id}:{occurrence.isoformat()}"
+        skipped = (
+            session.scalar(
+                select(RoutineSkip).where(
+                    RoutineSkip.routine_id == routine.id,
+                    RoutineSkip.scheduled_date == occurrence,
+                )
+            )
+            is not None
+        )
         existing = session.scalar(select(Task).where(Task.occurrence_key == occurrence_key))
-        if existing is None:
+        if existing is None and not skipped:
             task = Task(
                 title=routine.title,
                 status="open",

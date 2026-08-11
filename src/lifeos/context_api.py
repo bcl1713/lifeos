@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, Project, Routine, TaskList
+from lifeos.domain import AuditRecord, Goal, Project, Routine, RoutineSkip, TaskList
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
@@ -50,6 +50,11 @@ class RoutineUpdate(BaseModel):
     goal_id: int | None = None
 
 
+class RoutineSkipCreate(BaseModel):
+    scheduled_date: date
+    reason: str | None = Field(default=None, max_length=300)
+
+
 def _require_goal(session: Session, goal_id: int | None) -> None:
     if goal_id is not None and session.get(Goal, goal_id) is None:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -69,7 +74,7 @@ def _audit(
             entity_id=entity_id,
             action=action,
             actor=actor,
-            payload=json.dumps(payload, sort_keys=True),
+            payload=json.dumps(payload, default=str, sort_keys=True),
         )
     )
 
@@ -183,6 +188,37 @@ def generate_all(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"generated": generated}
+
+
+@router.post("/routines/{routine_id}/skip", status_code=status.HTTP_201_CREATED)
+def skip_routine(
+    routine_id: int,
+    payload: RoutineSkipCreate,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    routine = session.get(Routine, routine_id)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="Routine not found")
+    existing = session.scalar(
+        select(RoutineSkip).where(
+            RoutineSkip.routine_id == routine_id,
+            RoutineSkip.scheduled_date == payload.scheduled_date,
+        )
+    )
+    if existing is not None:
+        return {
+            "id": existing.id,
+            "routine_id": routine_id,
+            "scheduled_date": existing.scheduled_date,
+            "reason": existing.reason,
+        }
+    skip = RoutineSkip(routine_id=routine_id, scheduled_date=payload.scheduled_date, reason=payload.reason)
+    session.add(skip)
+    session.flush()
+    _audit(session, "routine", routine.id, "skipped", actor, payload.model_dump())
+    session.commit()
+    return {"id": skip.id, "routine_id": routine_id, "scheduled_date": skip.scheduled_date, "reason": skip.reason}
 
 
 @router.patch("/routines/{routine_id}")

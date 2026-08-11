@@ -63,3 +63,34 @@ def test_generate_all_routines_processes_active_routines_once(tmp_path) -> None:
     assert generated.status_code == 200
     assert generated.json()["generated"] == 2
     assert client.post("/api/routines/generate", params={"on": "2026-08-13"}).json()["generated"] == 0
+
+
+def test_routine_skip_advances_without_creating_an_occurrence(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    routine = client.post(
+        "/api/routines",
+        json={"title": "Stretch", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-11"},
+    ).json()
+    routine_id = routine["id"]
+    skip = client.post(
+        f"/api/routines/{routine_id}/skip",
+        json={"scheduled_date": "2026-08-11", "reason": "Travel"},
+    )
+    assert skip.status_code == 201
+    duplicate = client.post(
+        f"/api/routines/{routine_id}/skip",
+        json={"scheduled_date": "2026-08-11", "reason": "Different wording"},
+    )
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == skip.json()["id"]
+    generated = client.post(f"/api/routines/{routine_id}/generate", params={"on": "2026-08-12"})
+    assert generated.json()["generated"] == 1
+    tasks = client.get("/api/tasks", params={"limit": 10}).json()
+    assert [task["due_date"] for task in tasks] == ["2026-08-12"]

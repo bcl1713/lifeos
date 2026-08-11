@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -107,6 +107,20 @@ class Routine(Base):
     goal: Mapped[Optional[Goal]] = relationship(back_populates="routines")
     task_list: Mapped[TaskList] = relationship()
     tasks: Mapped[list["Task"]] = relationship(back_populates="routine")
+    skips: Mapped[list["RoutineSkip"]] = relationship(back_populates="routine", cascade="all, delete-orphan")
+
+
+class RoutineSkip(Base):
+    __tablename__ = "routine_skips"
+    __table_args__ = (UniqueConstraint("routine_id", "scheduled_date", name="uq_routine_skip_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    routine_id: Mapped[int] = mapped_column(ForeignKey("routines.id", ondelete="CASCADE"), nullable=False)
+    scheduled_date: Mapped[date] = mapped_column(Date, nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(300))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+    routine: Mapped[Routine] = relationship(back_populates="skips")
 
 
 class Task(Base):
