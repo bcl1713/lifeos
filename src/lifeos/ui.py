@@ -4,10 +4,10 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Task, TaskList, utcnow
+from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskList, utcnow
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -50,12 +50,7 @@ def render_tasks(request: Request, username: str, session: Session, *, all_tasks
     return templates.TemplateResponse(
         request=request,
         name=template,
-        context={
-            "username": username,
-            "tasks": tasks,
-            "task_lists": task_lists,
-            "today": date.today(),
-        },
+        context={"username": username, "tasks": tasks, "task_lists": task_lists, "today": date.today()},
     )
 
 
@@ -75,11 +70,7 @@ def login_page(request: Request) -> Response:
 
 
 @router.post("/login", response_class=HTMLResponse)
-def login_form(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...),
-) -> Response:
+def login_form(request: Request, username: str = Form(...), password: str = Form(...)) -> Response:
     token, authenticated = request.app.state.auth.create_session(username, password)
     if not authenticated:
         return templates.TemplateResponse(
@@ -110,9 +101,7 @@ def ui_logout(request: Request) -> RedirectResponse:
 
 @router.get("/tasks", response_class=HTMLResponse)
 def tasks_page(
-    request: Request,
-    username: str = Depends(require_user),
-    session: Session = Depends(get_session),
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> HTMLResponse:
     return render_tasks(request, username, session, all_tasks=True)
 
@@ -134,13 +123,7 @@ def create_ui_task(
     session.add(task)
     session.flush()
     session.add(
-        AuditRecord(
-            entity_type="task",
-            entity_id=task.id,
-            action="created",
-            actor=username,
-            payload='{"source":"web"}',
-        )
+        AuditRecord(entity_type="task", entity_id=task.id, action="created", actor=username, payload='{"source":"web"}')
     )
     session.commit()
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
@@ -148,18 +131,35 @@ def create_ui_task(
 
 @router.post("/ui/tasks/{task_id}/complete", status_code=status.HTTP_303_SEE_OTHER)
 def complete_ui_task(
-    task_id: int,
-    username: str = Depends(require_user),
-    session: Session = Depends(get_session),
+    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> RedirectResponse:
     return _set_ui_status(task_id, "completed", "completed", username, session)
 
 
+@router.post("/ui/tasks/{task_id}/pause", status_code=status.HTTP_303_SEE_OTHER)
+def pause_ui_task(
+    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> RedirectResponse:
+    return _set_ui_status(task_id, "paused", "paused", username, session)
+
+
+@router.post("/ui/tasks/{task_id}/cancel", status_code=status.HTTP_303_SEE_OTHER)
+def cancel_ui_task(
+    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> RedirectResponse:
+    return _set_ui_status(task_id, "cancelled", "cancelled", username, session)
+
+
+@router.post("/ui/tasks/{task_id}/archive", status_code=status.HTTP_303_SEE_OTHER)
+def archive_ui_task(
+    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> RedirectResponse:
+    return _set_ui_status(task_id, "archived", "archived", username, session)
+
+
 @router.post("/ui/tasks/{task_id}/reopen", status_code=status.HTTP_303_SEE_OTHER)
 def reopen_ui_task(
-    task_id: int,
-    username: str = Depends(require_user),
-    session: Session = Depends(get_session),
+    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> RedirectResponse:
     return _set_ui_status(task_id, "open", "reopened", username, session)
 
@@ -181,3 +181,129 @@ def _set_ui_status(task_id: int, status_value: str, action: str, username: str, 
     )
     session.commit()
     return RedirectResponse("/" if status_value == "completed" else "/tasks", status_code=status.HTTP_303_SEE_OTHER)
+
+
+def render_context(
+    request: Request, username: str, session: Session, title: str, singular: str, items: list, action: str
+) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="context.html",
+        context={
+            "username": username,
+            "title": title,
+            "singular": singular,
+            "items": items,
+            "action": action,
+            "task_lists": list(session.scalars(select(TaskList).order_by(TaskList.name))),
+        },
+    )
+
+
+@router.get("/goals", response_class=HTMLResponse)
+def goals_page(
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    return render_context(
+        request, username, session, "Goals", "goal", list(session.scalars(select(Goal).order_by(Goal.id))), "/ui/goals"
+    )
+
+
+@router.post("/ui/goals", status_code=status.HTTP_303_SEE_OTHER)
+def create_ui_goal(
+    title: str = Form(...), username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> RedirectResponse:
+    session.add(Goal(title=title.strip()))
+    session.commit()
+    return RedirectResponse("/goals", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/projects", response_class=HTMLResponse)
+def projects_page(
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    return render_context(
+        request,
+        username,
+        session,
+        "Projects",
+        "project",
+        list(session.scalars(select(Project).order_by(Project.id))),
+        "/ui/projects",
+    )
+
+
+@router.post("/ui/projects", status_code=status.HTTP_303_SEE_OTHER)
+def create_ui_project(
+    title: str = Form(...),
+    goal_id: str = Form(default=""),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> RedirectResponse:
+    parsed_goal = int(goal_id) if goal_id else None
+    if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    session.add(Project(title=title.strip(), goal_id=parsed_goal))
+    session.commit()
+    return RedirectResponse("/projects", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/routines", response_class=HTMLResponse)
+def routines_page(
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    ensure_default_list(session)
+    return render_context(
+        request,
+        username,
+        session,
+        "Routines",
+        "routine",
+        list(session.scalars(select(Routine).order_by(Routine.id))),
+        "/ui/routines",
+    )
+
+
+@router.post("/ui/routines", status_code=status.HTTP_303_SEE_OTHER)
+def create_ui_routine(
+    title: str = Form(...),
+    cadence: str = Form(...),
+    start_date: str = Form(...),
+    task_list_id: int = Form(...),
+    goal_id: str = Form(default=""),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
+) -> RedirectResponse:
+    if session.get(TaskList, task_list_id) is None:
+        raise HTTPException(status_code=404, detail="Task list not found")
+    parsed_goal = int(goal_id) if goal_id else None
+    if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    session.add(
+        Routine(
+            title=title.strip(),
+            cadence=cadence.strip(),
+            next_run_date=date.fromisoformat(start_date),
+            task_list_id=task_list_id,
+            goal_id=parsed_goal,
+        )
+    )
+    session.commit()
+    return RedirectResponse("/routines", status_code=status.HTTP_303_SEE_OTHER)
+
+
+@router.get("/data", response_class=HTMLResponse)
+def data_page(
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    counts = {
+        "tasks": session.scalar(select(func.count()).select_from(Task)) or 0,
+        "goals": session.scalar(select(func.count()).select_from(Goal)) or 0,
+        "projects": session.scalar(select(func.count()).select_from(Project)) or 0,
+        "routines": session.scalar(select(func.count()).select_from(Routine)) or 0,
+        "audit": session.scalar(select(func.count()).select_from(AuditRecord)) or 0,
+    }
+    audits = list(session.scalars(select(AuditRecord).order_by(AuditRecord.id.desc()).limit(20)))
+    return templates.TemplateResponse(
+        request=request, name="data.html", context={"username": username, "counts": counts, "audits": audits}
+    )

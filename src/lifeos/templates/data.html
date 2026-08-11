@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Data · LifeOS{% endblock %}
+{% block content %}
+<h1>Data</h1>
+<p class="muted">Read-only operational context. LifeOS task state remains managed through Today and Tasks.</p>
+<section class="card">
+  <h2>Record counts</h2>
+  <ul>
+    <li>Tasks: {{ counts.tasks }}</li>
+    <li>Goals: {{ counts.goals }}</li>
+    <li>Projects: {{ counts.projects }}</li>
+    <li>Routines: {{ counts.routines }}</li>
+    <li>Audit records: {{ counts.audit }}</li>
+  </ul>
+</section>
+<section class="card">
+  <h2>Recent audit activity</h2>
+  {% if audits %}{% for audit in audits %}<div class="task"><div class="task-title"><strong>{{ audit.action }}</strong><span class="muted">{{ audit.entity_type }} {{ audit.entity_id }} · {{ audit.actor }} · {{ audit.created_at }}</span></div></div>{% endfor %}{% else %}<p class="empty">No audit activity yet.</p>{% endif %}
+</section>
+{% endblock %}

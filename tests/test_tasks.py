@@ -47,6 +47,40 @@ def test_authenticated_user_can_create_complete_and_reopen_task_with_audit_histo
     ]
 
 
+def test_task_lifecycle_metadata_and_state_transitions_are_audited(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    created = client.post(
+        "/api/tasks",
+        json={
+            "title": "Lifecycle task",
+            "task_list_id": list_id,
+            "priority": 2,
+            "tags": ["focus", "home"],
+            "source_ref": "wiki:02-Areas/Personal/Index.md",
+        },
+    )
+    assert created.status_code == 201
+    task = created.json()
+    assert task["priority"] == 2
+    assert task["tags"] == ["focus", "home"]
+    assert task["source_ref"] == "wiki:02-Areas/Personal/Index.md"
+
+    for action, expected in (("pause", "paused"), ("cancel", "cancelled"), ("archive", "archived"), ("reopen", "open")):
+        response = client.post(f"/api/tasks/{task['id']}/{action}")
+        assert response.status_code == 200
+        assert response.json()["status"] == expected
+
+    audit = client.get(f"/api/tasks/{task['id']}/audit")
+    assert [entry["action"] for entry in audit.json()] == ["created", "paused", "cancelled", "archived", "reopened"]
+
+
 def test_task_api_requires_authentication_and_allows_repeated_titles(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",

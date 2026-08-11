@@ -7,7 +7,7 @@ LifeOS is deployed through the Git-backed `bcl1713/homelab-stacks` repository. D
 - Portainer stack: `app-lifeos` (endpoint 3)
 - Git source: `https://github.com/bcl1713/homelab-stacks.git`
 - Compose path: `stacks/apps/lifeos/compose.yaml`
-- Current image: `ghcr.io/bcl1713/lifeos:v0.2.1`
+- Current image: `ghcr.io/bcl1713/lifeos:v0.2.3`
 - Current application revision: `a6d0b8931aa22bbd930285e0dc747fe2a7a83fa6`
 - Access: private LAN/Tailscale through the external `proxy` network
 - Hostname: `https://lifeos.hblucas.org`
@@ -63,6 +63,28 @@ A live backup was created and verified during deployment at `/backups/lifeos-liv
 
 The approved retention policy remains **30 daily / 12 monthly**. Automated retention scheduling still needs to be added at the infrastructure layer.
 
+Export the complete database to portable JSON:
+
+```bash
+docker exec app-lifeos-lifeos-1 \
+  python /app/scripts/export_lifeos.py \
+  /data/lifeos.db /backups/lifeos-export-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+
+Review retention without deleting anything:
+
+```bash
+docker exec app-lifeos-lifeos-1 \
+  python /app/scripts/retain_lifeos_backups.py /backups
+```
+
+Apply retention only after reviewing the dry-run output:
+
+```bash
+docker exec app-lifeos-lifeos-1 \
+  python /app/scripts/retain_lifeos_backups.py /backups --apply
+```
+
 ## Google Tasks migration rehearsal
 
 The read-only source inventory currently contains 49 records:
@@ -74,7 +96,7 @@ The staging rehearsal selected all 49 records under the agreed rule: all open re
 
 The migration adapter is offline and deterministic. It does not write to Google Tasks. It preserves list, title, notes, due date, status, and a source marker containing the Google list/task IDs.
 
-Production cutover is not yet approved. Until explicit cutover approval, Google Tasks remains read-only source data and LifeOS is not yet the sole active task authority.
+Production cutover completed on 2026-08-11 after explicit approval. The final read-only snapshot contained 49 records; all 49 were imported into LifeOS with source markers. Google Tasks is now historical/read-only source data, and scheduled task-writing workflows target LifeOS.
 
 ## Verification targets
 
@@ -89,13 +111,11 @@ Verified:
 - Backup creation and integrity verification succeed.
 - Google Tasks staging counts reconcile exactly.
 
-Remaining before cutover:
+Remaining operational follow-up:
 
 - Add scheduled 30-daily/12-monthly backup retention.
-- Perform a final production backup immediately before import.
-- Obtain explicit approval for the final Google Tasks delta import and write cutover.
-- Disable Google Tasks writes only after final read-back verification.
-- Verify the rollback path after the cutover decision.
+- Verify the first scheduled family-triage run writes to LifeOS rather than Google Tasks.
+- Keep Google Tasks read-only as a historical archive and retain the final export snapshot.
 
 ## Portainer Git redeploy note
 

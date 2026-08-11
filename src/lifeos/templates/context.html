@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · LifeOS{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="muted">{{ username }} · active planning context</p>
+<div class="grid">
+  <section class="card">
+    <h2>{{ title }}</h2>
+    {% if items %}
+      {% for item in items %}
+      <div class="task">
+        <div class="task-title">
+          <strong>{{ item.title }}</strong>
+          {% if item.status %}<span class="muted">{{ item.status }}</span>{% endif %}
+          {% if item.cadence %}<span class="muted"> · {{ item.cadence }} from {{ item.next_run_date }}</span>{% endif %}
+          {% if item.goal_id %}<span class="muted"> · goal {{ item.goal_id }}</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}<p class="empty">No {{ title|lower }} yet.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Add {{ singular }}</h2>
+    <form method="post" action="{{ action }}">
+      <label for="title">Title</label><input id="title" name="title" maxlength="300" required>
+      {% if singular == "project" %}
+      <label for="goal_id">Goal (optional)</label><input id="goal_id" name="goal_id" type="number" min="1">
+      {% elif singular == "routine" %}
+      <label for="cadence">Cadence</label><select id="cadence" name="cadence"><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select>
+      <label for="start_date">Start date</label><input id="start_date" name="start_date" type="date" required>
+      <label for="task_list_id">Task list</label><select id="task_list_id" name="task_list_id">{% for item in task_lists %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select>
+      <label for="goal_id">Goal (optional)</label><input id="goal_id" name="goal_id" type="number" min="1">
+      {% endif %}
+      <p><button type="submit">Add {{ singular }}</button></p>
+    </form>
+  </section>
+</div>
+{% endblock %}

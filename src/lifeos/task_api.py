@@ -21,6 +21,9 @@ class TaskCreate(BaseModel):
     title: str = Field(min_length=1, max_length=500)
     task_list_id: int
     notes: str | None = None
+    priority: int = Field(default=0, ge=0, le=3)
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    source_ref: str | None = Field(default=None, max_length=500)
     due_date: date | None = None
     goal_id: int | None = None
     project_id: int | None = None
@@ -31,6 +34,9 @@ class TaskCreate(BaseModel):
 class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=500)
     notes: str | None = None
+    priority: int | None = Field(default=None, ge=0, le=3)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    source_ref: str | None = Field(default=None, max_length=500)
     due_date: date | None = None
     task_list_id: int | None = None
     goal_id: int | None = None
@@ -64,6 +70,9 @@ def serialize_task(task: Task) -> dict[str, Any]:
         "title": task.title,
         "notes": task.notes,
         "status": task.status,
+        "priority": task.priority,
+        "tags": json.loads(task.tags or "[]"),
+        "source_ref": task.source_ref,
         "due_date": task.due_date,
         "task_list_id": task.task_list_id,
         "goal_id": task.goal_id,
@@ -143,7 +152,9 @@ def create_task(
     if session.get(TaskList, payload.task_list_id) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     validate_task_links(session, payload.model_dump())
-    task = Task(**payload.model_dump())
+    values = payload.model_dump()
+    values["tags"] = json.dumps(values["tags"], sort_keys=True)
+    task = Task(**values)
     session.add(task)
     try:
         session.flush()
@@ -167,6 +178,8 @@ def update_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     changes = payload.model_dump(exclude_unset=True)
+    if "tags" in changes:
+        changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     validate_task_links(session, changes)
@@ -190,6 +203,33 @@ def complete_task(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     return _set_task_status(session, task_id=task_id, status_value="completed", action="completed", actor=actor)
+
+
+@router.post("/tasks/{task_id}/pause")
+def pause_task(
+    task_id: int,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return _set_task_status(session, task_id=task_id, status_value="paused", action="paused", actor=actor)
+
+
+@router.post("/tasks/{task_id}/cancel")
+def cancel_task(
+    task_id: int,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return _set_task_status(session, task_id=task_id, status_value="cancelled", action="cancelled", actor=actor)
+
+
+@router.post("/tasks/{task_id}/archive")
+def archive_task(
+    task_id: int,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return _set_task_status(session, task_id=task_id, status_value="archived", action="archived", actor=actor)
 
 
 @router.post("/tasks/{task_id}/reopen")
