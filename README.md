@@ -17,6 +17,7 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - Runtime target: private Docker/Portainer deployment on existing TrueNAS infrastructure
 - Web UI: `/login`, `/`, and `/tasks` provide authenticated browser task operations.
 - Recovery tooling: `python /app/scripts/backup_lifeos.py` creates an online SQLite backup in `/backups`; `python /app/scripts/verify_backup.py /backups/<file>.db` validates integrity and required tables.
+- Wiki provenance validation: `python scripts/validate_wiki_provenance.py /home/brian/wiki` checks opted-in frontmatter/provenance metadata and reports bounded legacy-note warnings.
 
 ## Local development
 
