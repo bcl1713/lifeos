@@ -7,6 +7,7 @@ from lifeos import __version__
 from lifeos.auth import AuthService
 from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
+from lifeos.scheduler import scheduler_lifespan
 from lifeos.task_api import router as task_router
 
 _SESSION_COOKIE = "lifeos_session"
@@ -23,6 +24,8 @@ def create_app(
     auth_username: str | None = None,
     auth_password: str | None = None,
     agent_token: str | None = None,
+    scheduler_enabled: bool | None = None,
+    scheduler_interval_seconds: int | None = None,
 ) -> FastAPI:
     database_url = database_url or os.getenv("DATABASE_URL", "sqlite:///./data/lifeos.db")
     engine = create_engine(database_url)
@@ -39,10 +42,22 @@ def create_app(
     if configured_agent_token:
         auth.ensure_agent(configured_agent_token)
 
-    app = FastAPI(title="LifeOS", version=__version__)
+    scheduler_enabled = (
+        scheduler_enabled if scheduler_enabled is not None else os.getenv("LIFEOS_SCHEDULER_ENABLED", "1") == "1"
+    )
+    scheduler_interval_seconds = scheduler_interval_seconds or int(
+        os.getenv("LIFEOS_SCHEDULER_INTERVAL_SECONDS", "900")
+    )
+    app = FastAPI(
+        title="LifeOS",
+        version=__version__,
+        lifespan=scheduler_lifespan if scheduler_enabled else None,
+    )
     app.state.engine = engine
     app.state.auth = auth
     app.state.session_factory = session_factory
+    app.state.scheduler_timezone = os.getenv("LIFEOS_TIMEZONE", "UTC")
+    app.state.scheduler_interval_seconds = scheduler_interval_seconds
     app.include_router(context_router)
     app.include_router(task_router)
 

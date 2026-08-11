@@ -4,7 +4,12 @@ Private life operating system for tasks, routines, goals, projects, reviews, and
 
 ## Status
 
-Initial application scaffold. The service currently exposes an authenticated deployment-ready health surface; domain and task persistence work follows the implementation plan in the wiki.
+Initial application scaffold plus authenticated domain API and automatic routine-task generation.
+
+- `/healthz` is public.
+- `/auth/login`, `/auth/logout`, `/auth/me`, and agent bearer authentication are available.
+- Tasks, task lists, goals, projects, and routines have SQLite-backed CRUD APIs.
+- Active routines generate idempotent concrete task occurrences through the in-container scheduler.
 
 - Source repository: `bcl1713/lifeos`
 - Deployment repository: `bcl1713/homelab-stacks`
