@@ -15,6 +15,8 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - Deployment repository: `bcl1713/homelab-stacks`
 - Image registry: `ghcr.io/bcl1713/lifeos`
 - Runtime target: private Docker/Portainer deployment on existing TrueNAS infrastructure
+- Web UI: `/login`, `/`, and `/tasks` provide authenticated browser task operations.
+- Recovery tooling: `python /app/scripts/backup_lifeos.py` creates an online SQLite backup in `/backups`; `python /app/scripts/verify_backup.py /backups/<file>.db` validates integrity and required tables.
 
 ## Local development
 

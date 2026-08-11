@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Tasks · LifeOS{% endblock %}
+{% block content %}
+<h1>Tasks</h1>
+<p class="muted">All task records, including completed history.</p>
+<section class="card">
+{% if tasks %}{% for task in tasks %}
+<div class="task">
+  {% if task.status == 'completed' %}<form method="post" action="/ui/tasks/{{ task.id }}/reopen"><button class="secondary" type="submit">Reopen</button></form>{% else %}<form method="post" action="/ui/tasks/{{ task.id }}/complete"><button class="complete" type="submit">Done</button></form>{% endif %}
+  <div class="task-title"><strong>{{ task.title }}</strong><span class="muted">{{ task.status|title }}{% if task.due_date %} · due {{ task.due_date }}{% endif %}</span>{% if task.notes %}<div class="muted">{{ task.notes }}</div>{% endif %}</div>
+</div>
+{% endfor %}{% else %}<p class="empty">No tasks yet.</p>{% endif %}
+</section>
+{% endblock %}

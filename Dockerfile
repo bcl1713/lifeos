@@ -11,6 +11,7 @@ RUN addgroup --system lifeos && adduser --system --ingroup lifeos lifeos
 COPY pyproject.toml README.md alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
+COPY scripts ./scripts
 COPY docker-entrypoint.sh /usr/local/bin/lifeos-entrypoint
 
 RUN pip install --no-cache-dir . && chmod 755 /usr/local/bin/lifeos-entrypoint && mkdir -p /data && chown -R lifeos:lifeos /app /data

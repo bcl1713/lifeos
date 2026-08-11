@@ -4,13 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lifeos"
-version = "0.1.0"
+version = "0.2.0"
 description = "Private life operating system"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
+  "jinja2>=3.1,<4",
+  "python-multipart>=0.0.9,<1",
   "sqlalchemy>=2.0,<3",
   "uvicorn[standard]>=0.30,<1",
 ]
@@ -26,6 +28,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["."]
 addopts = "-q"
 
 [tool.ruff]

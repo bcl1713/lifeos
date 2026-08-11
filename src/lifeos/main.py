@@ -9,6 +9,7 @@ from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.scheduler import scheduler_lifespan
 from lifeos.task_api import router as task_router
+from lifeos.ui import router as ui_router
 
 _SESSION_COOKIE = "lifeos_session"
 
@@ -60,6 +61,7 @@ def create_app(
     app.state.scheduler_interval_seconds = scheduler_interval_seconds
     app.include_router(context_router)
     app.include_router(task_router)
+    app.include_router(ui_router)
 
     def require_user(request: Request) -> str:
         username = auth.get_session_username(request.cookies.get(_SESSION_COOKIE))

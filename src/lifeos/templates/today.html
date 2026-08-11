@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Today · LifeOS{% endblock %}
+{% block content %}
+<h1>Today</h1>
+<p class="muted">{{ username }} · {{ today }}</p>
+<div class="grid">
+  <section class="card">
+    <h2>Open tasks</h2>
+    {% if tasks %}
+      {% for task in tasks %}
+      <div class="task">
+        <form method="post" action="/ui/tasks/{{ task.id }}/complete"><button class="complete" type="submit" aria-label="Complete {{ task.title }}">Done</button></form>
+        <div class="task-title"><strong>{{ task.title }}</strong>{% if task.due_date %}<span class="muted {% if task.due_date < today %}overdue{% endif %}">Due {{ task.due_date }}</span>{% endif %}{% if task.notes %}<div class="muted">{{ task.notes }}</div>{% endif %}</div>
+      </div>
+      {% endfor %}
+    {% else %}<p class="empty">Nothing open for today. Civilization survives another morning.</p>{% endif %}
+  </section>
+  <section class="card">
+    <h2>Add task</h2>
+    <form method="post" action="/ui/tasks">
+      <label for="title">Task</label><input id="title" name="title" maxlength="500" required>
+      <label for="task_list_id">List</label><select id="task_list_id" name="task_list_id">{% for item in task_lists %}<option value="{{ item.id }}">{{ item.name }}</option>{% endfor %}</select>
+      <label for="due_date">Due date</label><input id="due_date" name="due_date" type="date">
+      <label for="notes">Notes</label><textarea id="notes" name="notes" rows="3"></textarea>
+      <p><button type="submit">Add task</button></p>
+    </form>
+  </section>
+</div>
+{% endblock %}
