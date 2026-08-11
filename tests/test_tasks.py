@@ -1,4 +1,3 @@
-
 from fastapi.testclient import TestClient
 
 from lifeos.main import create_app
@@ -48,7 +47,7 @@ def test_authenticated_user_can_create_complete_and_reopen_task_with_audit_histo
     ]
 
 
-def test_task_api_requires_authentication_and_rejects_duplicate_titles(tmp_path) -> None:
+def test_task_api_requires_authentication_and_allows_repeated_titles(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
@@ -66,7 +65,7 @@ def test_task_api_requires_authentication_and_rejects_duplicate_titles(tmp_path)
     payload = {"title": "Same task", "task_list_id": list_id}
     assert client.post("/api/tasks", headers=headers, json=payload).status_code == 201
     duplicate = client.post("/api/tasks", headers=headers, json=payload)
-    assert duplicate.status_code == 409
+    assert duplicate.status_code == 201
 
 
 def test_task_listing_supports_status_filter_and_pagination(tmp_path) -> None:

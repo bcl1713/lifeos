@@ -23,14 +23,20 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
     assert project.status_code == 201
     project_id = project.json()["id"]
 
+    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
     routine = client.post(
         "/api/routines",
-        json={"title": "Weekly planning", "cadence": "weekly", "goal_id": goal_id},
+        json={
+            "title": "Weekly planning",
+            "cadence": "weekly",
+            "goal_id": goal_id,
+            "task_list_id": 1,
+            "start_date": "2026-08-11",
+        },
     )
     assert routine.status_code == 201
     routine_id = routine.json()["id"]
 
-    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
     task = client.post(
         "/api/tasks",
         json={

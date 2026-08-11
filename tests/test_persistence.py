@@ -18,7 +18,13 @@ def test_initialize_database_creates_core_schema_and_persists_relationships(tmp_
     task_list = TaskList(name="Personal")
     goal = Goal(title="Build a sustainable routine")
     project = Project(title="LifeOS", goal=goal)
-    routine = Routine(title="Morning review", cadence="daily", goal=goal)
+    routine = Routine(
+        title="Morning review",
+        cadence="daily",
+        goal=goal,
+        task_list=task_list,
+        next_run_date=date(2026, 8, 12),
+    )
     task = Task(
         title="Review today",
         task_list=task_list,

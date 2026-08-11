@@ -1,4 +1,3 @@
-
 from fastapi.testclient import TestClient
 
 from lifeos.main import create_app
@@ -35,8 +34,6 @@ def test_agent_token_is_bearer_authenticated_and_can_be_revoked(tmp_path) -> Non
     )
     client = TestClient(app)
 
-    assert client.get("/auth/agent", headers={"Authorization": "Bearer agent-secret"}).json() == {
-        "actor": "agent"
-    }
+    assert client.get("/auth/agent", headers={"Authorization": "Bearer agent-secret"}).json() == {"actor": "agent"}
     assert client.get("/auth/agent").status_code == 401
     assert client.get("/auth/agent", headers={"Authorization": "Bearer wrong"}).status_code == 401

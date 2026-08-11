@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -96,6 +96,8 @@ class Routine(Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     cadence: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    next_run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    task_list_id: Mapped[int] = mapped_column(ForeignKey("task_lists.id", ondelete="CASCADE"), nullable=False)
     goal_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -103,12 +105,12 @@ class Routine(Base):
     )
 
     goal: Mapped[Optional[Goal]] = relationship(back_populates="routines")
+    task_list: Mapped[TaskList] = relationship()
     tasks: Mapped[list["Task"]] = relationship(back_populates="routine")
 
 
 class Task(Base):
     __tablename__ = "tasks"
-    __table_args__ = (UniqueConstraint("task_list_id", "title", name="uq_task_list_title"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
@@ -119,6 +121,7 @@ class Task(Base):
     goal_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"))
     project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
     routine_id: Mapped[Optional[int]] = mapped_column(ForeignKey("routines.id", ondelete="SET NULL"))
+    occurrence_key: Mapped[Optional[str]] = mapped_column(String(180), unique=True)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

@@ -13,9 +13,7 @@ _SESSION_TTL = timedelta(hours=12)
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
     salt = salt or secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac(
-        "sha256", password.encode(), salt, _PASSWORD_ITERATIONS
-    )
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _PASSWORD_ITERATIONS)
     return f"pbkdf2_sha256${_PASSWORD_ITERATIONS}${salt.hex()}${digest.hex()}"
 
 
@@ -24,9 +22,7 @@ def verify_password(password: str, encoded: str) -> bool:
         algorithm, iterations, salt_hex, digest_hex = encoded.split("$", 3)
         if algorithm != "pbkdf2_sha256":
             return False
-        candidate = hashlib.pbkdf2_hmac(
-            "sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations)
-        )
+        candidate = hashlib.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), int(iterations))
         return hmac.compare_digest(candidate.hex(), digest_hex)
     except (TypeError, ValueError):
         return False
@@ -53,9 +49,7 @@ class AuthService:
 
     def ensure_agent(self, token: str, name: str = "jarvis") -> None:
         with self.session_factory() as session:
-            credential = session.scalar(
-                select(AgentCredential).where(AgentCredential.name == name)
-            )
+            credential = session.scalar(select(AgentCredential).where(AgentCredential.name == name))
             if credential is None:
                 session.add(AgentCredential(name=name, token_hash=hash_token(token)))
                 session.commit()
@@ -80,9 +74,7 @@ class AuthService:
         if not token:
             return None
         with self.session_factory() as session:
-            record = session.scalar(
-                select(SessionRecord).where(SessionRecord.token_hash == hash_token(token))
-            )
+            record = session.scalar(select(SessionRecord).where(SessionRecord.token_hash == hash_token(token)))
             if record is None or record.revoked_at is not None or as_utc(record.expires_at) <= utcnow():
                 return None
             user = session.get(User, record.user_id)
@@ -92,9 +84,7 @@ class AuthService:
         if not token:
             return
         with self.session_factory() as session:
-            record = session.scalar(
-                select(SessionRecord).where(SessionRecord.token_hash == hash_token(token))
-            )
+            record = session.scalar(select(SessionRecord).where(SessionRecord.token_hash == hash_token(token)))
             if record is not None:
                 record.revoked_at = utcnow()
                 session.commit()
@@ -103,9 +93,7 @@ class AuthService:
         if not token:
             return False
         with self.session_factory() as session:
-            credential = session.scalar(
-                select(AgentCredential).where(AgentCredential.token_hash == hash_token(token))
-            )
+            credential = session.scalar(select(AgentCredential).where(AgentCredential.token_hash == hash_token(token)))
             if credential is None or credential.revoked_at is not None:
                 return False
             credential.last_used_at = utcnow()
