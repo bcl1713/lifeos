@@ -249,6 +249,18 @@ def _set_task_status(session: Session, *, task_id: int, status_value: str, actio
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if status_value == "completed":
+        dependencies = session.scalars(select(TaskDependency).where(TaskDependency.task_id == task_id))
+        unfinished = [
+            dependency.depends_on_task_id
+            for dependency in dependencies
+            if (dependency_task := session.get(Task, dependency.depends_on_task_id)) is not None
+            and dependency_task.status not in {"completed", "cancelled", "archived"}
+        ]
+        if unfinished:
+            raise HTTPException(
+                status_code=409, detail={"message": "Task has unfinished dependencies", "task_ids": unfinished}
+            )
     task.status = status_value
     task.updated_at = utcnow()
     add_audit(session, task_id=task.id, action=action, actor=actor, payload={"status": status_value})

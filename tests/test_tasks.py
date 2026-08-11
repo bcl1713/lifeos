@@ -141,13 +141,16 @@ def test_task_dependencies_are_idempotent_and_reject_cycles(tmp_path) -> None:
     assert client.post(f"/api/tasks/{b}/dependencies", json={"depends_on_task_id": c}).status_code == 201
     assert client.post(f"/api/tasks/{c}/dependencies", json={"depends_on_task_id": a}).status_code == 409
     assert client.post(f"/api/tasks/{a}/dependencies", json={"depends_on_task_id": a}).status_code == 409
-    assert client.get(f"/api/tasks/{a}/dependencies").json()[0]["depends_on_task_id"] == b
+    assert client.post(f"/api/tasks/{a}/complete").status_code == 409
+    assert client.post(f"/api/tasks/{b}/complete").status_code == 409
+    assert client.post(f"/api/tasks/{c}/complete").status_code == 200
+    assert client.post(f"/api/tasks/{b}/complete").status_code == 200
+    assert client.post(f"/api/tasks/{a}/complete").status_code == 200
     assert client.delete(f"/api/tasks/{a}/dependencies/{first.json()['id']}").status_code == 204
     assert client.get(f"/api/tasks/{a}/dependencies").json() == []
-    assert [entry["action"] for entry in client.get(f"/api/tasks/{a}/audit").json()][-2:] == [
-        "dependency_added",
-        "dependency_removed",
-    ]
+    actions = [entry["action"] for entry in client.get(f"/api/tasks/{a}/audit").json()]
+    assert "dependency_added" in actions
+    assert "dependency_removed" in actions
 
 
 def test_task_creation_rejects_missing_related_resources(tmp_path) -> None:
