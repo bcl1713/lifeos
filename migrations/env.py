@@ -1,7 +1,7 @@
 """Alembic environment for LifeOS."""
 
-from logging.config import fileConfig
 import os
+from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context

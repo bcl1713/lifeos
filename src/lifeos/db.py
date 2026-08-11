@@ -10,6 +10,8 @@ from lifeos.domain import Base
 
 def create_engine(database_url: str | Path) -> Engine:
     url = str(database_url)
+    if url.startswith("sqlite:///") and url != "sqlite:///:memory:":
+        Path(url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
     connect_args = {"check_same_thread": False} if url.startswith("sqlite") else {}
     return sqlalchemy_create_engine(url, connect_args=connect_args, future=True)
 
