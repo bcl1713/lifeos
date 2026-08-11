@@ -11,10 +11,12 @@ RUN addgroup --system lifeos && adduser --system --ingroup lifeos lifeos
 COPY pyproject.toml README.md alembic.ini ./
 COPY migrations ./migrations
 COPY src ./src
+COPY docker-entrypoint.sh /usr/local/bin/lifeos-entrypoint
 
-RUN pip install --no-cache-dir . && mkdir -p /data && chown -R lifeos:lifeos /app /data
+RUN pip install --no-cache-dir . && chmod 755 /usr/local/bin/lifeos-entrypoint && mkdir -p /data && chown -R lifeos:lifeos /app /data
 
-USER lifeos
+USER root
+ENTRYPOINT ["/usr/local/bin/lifeos-entrypoint"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
