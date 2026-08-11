@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from lifeos import __version__
 from lifeos.auth import AuthService
+from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.task_api import router as task_router
 
@@ -42,6 +43,7 @@ def create_app(
     app.state.engine = engine
     app.state.auth = auth
     app.state.session_factory = session_factory
+    app.include_router(context_router)
     app.include_router(task_router)
 
     def require_user(request: Request) -> str:

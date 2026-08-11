@@ -67,3 +67,38 @@ def test_task_api_requires_authentication_and_rejects_duplicate_titles(tmp_path)
     assert client.post("/api/tasks", headers=headers, json=payload).status_code == 201
     duplicate = client.post("/api/tasks", headers=headers, json=payload)
     assert duplicate.status_code == 409
+
+
+def test_task_listing_supports_status_filter_and_pagination(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    for title in ("First", "Second", "Third"):
+        response = client.post("/api/tasks", json={"title": title, "task_list_id": list_id})
+        assert response.status_code == 201
+
+    client.post("/api/tasks/2/complete")
+    assert len(client.get("/api/tasks", params={"status": "completed"}).json()) == 1
+    assert len(client.get("/api/tasks", params={"limit": 1, "offset": 1}).json()) == 1
+
+
+def test_task_creation_rejects_missing_related_resources(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+
+    response = client.post(
+        "/api/tasks",
+        json={"title": "Dangling link", "task_list_id": list_id, "project_id": 999},
+    )
+    assert response.status_code == 404

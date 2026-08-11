@@ -2,13 +2,13 @@ import json
 from datetime import date
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Task, TaskList, utcnow
+from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskList, utcnow
 
 router = APIRouter(prefix="/api")
 
@@ -87,6 +87,14 @@ def add_audit(session: Session, *, task_id: int, action: str, actor: str, payloa
     )
 
 
+def validate_task_links(session: Session, values: dict[str, Any]) -> None:
+    related = (("goal_id", Goal), ("project_id", Project), ("routine_id", Routine))
+    for field, model in related:
+        value = values.get(field)
+        if value is not None and session.get(model, value) is None:
+            raise HTTPException(status_code=404, detail=f"{model.__name__} not found")
+
+
 @router.get("/task-lists")
 def list_task_lists(
     _actor: str = Depends(get_actor),
@@ -114,11 +122,13 @@ def create_task_list(
 
 @router.get("/tasks")
 def list_tasks(
-    status_filter: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     _actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> list[dict[str, Any]]:
-    query = select(Task).order_by(Task.due_date.is_(None), Task.due_date, Task.id)
+    query = select(Task).order_by(Task.due_date.is_(None), Task.due_date, Task.id).offset(offset).limit(limit)
     if status_filter:
         query = query.where(Task.status == status_filter)
     return [serialize_task(task) for task in session.scalars(query)]
@@ -132,6 +142,7 @@ def create_task(
 ) -> dict[str, Any]:
     if session.get(TaskList, payload.task_list_id) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
+    validate_task_links(session, payload.model_dump())
     task = Task(**payload.model_dump())
     session.add(task)
     try:
@@ -158,6 +169,7 @@ def update_task(
     changes = payload.model_dump(exclude_unset=True)
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
+    validate_task_links(session, changes)
     for field, value in changes.items():
         setattr(task, field, value)
     try:
