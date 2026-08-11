@@ -8,7 +8,8 @@ WORKDIR /app
 
 RUN addgroup --system lifeos && adduser --system --ingroup lifeos lifeos
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
+COPY migrations ./migrations
 COPY src ./src
 
 RUN pip install --no-cache-dir . && mkdir -p /data && chown -R lifeos:lifeos /app /data
