@@ -62,6 +62,16 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
             session.query(AuditRecord).filter(AuditRecord.entity_type.in_(["goal", "project", "routine"])).count() >= 4
         )
     assert client.patch(f"/api/goals/{goal_id}", json={"status": "made-up"}).status_code == 422
+    milestone = client.post(f"/api/goals/{goal_id}/milestones", json={"title": "Ship the first release"})
+    assert milestone.status_code == 201
+    assert client.get("/api/goals").json()[0]["progress"] == 0.0
+    milestone_id = milestone.json()["id"]
+    assert (
+        client.patch(f"/api/goals/{goal_id}/milestones/{milestone_id}", json={"status": "completed"}).status_code == 200
+    )
+    goal_view = client.get("/api/goals").json()[0]
+    assert goal_view["milestones_completed"] == 1
+    assert goal_view["progress"] == 100.0
 
 
 def test_context_resources_require_authentication(tmp_path) -> None:

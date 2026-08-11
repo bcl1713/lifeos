@@ -71,6 +71,24 @@ class Goal(Base):
     projects: Mapped[list["Project"]] = relationship(back_populates="goal")
     routines: Mapped[list["Routine"]] = relationship(back_populates="goal")
     tasks: Mapped[list["Task"]] = relationship(back_populates="goal")
+    milestones: Mapped[list["GoalMilestone"]] = relationship(back_populates="goal", cascade="all, delete-orphan")
+
+
+class GoalMilestone(Base):
+    __tablename__ = "goal_milestones"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    goal_id: Mapped[int] = mapped_column(ForeignKey("goals.id", ondelete="CASCADE"), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="open", nullable=False)
+    due_date: Mapped[Optional[date]] = mapped_column(Date)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+    goal: Mapped[Goal] = relationship(back_populates="milestones")
 
 
 class Project(Base):

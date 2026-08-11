@@ -18,7 +18,7 @@ REQUIRED_TABLES = {
     "routines",
     "audit_records",
 }
-OPTIONAL_TABLES = {"metric_definitions", "metric_entries", "routine_skips"}
+OPTIONAL_TABLES = {"metric_definitions", "metric_entries", "routine_skips", "goal_milestones"}
 
 
 def verify_backup(database: Path) -> dict[str, int]:

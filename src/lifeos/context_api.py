@@ -1,5 +1,5 @@
 import json
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, Project, Routine, RoutineSkip, TaskList
+from lifeos.domain import AuditRecord, Goal, GoalMilestone, Project, Routine, RoutineSkip, TaskList
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
@@ -21,6 +21,17 @@ class GoalCreate(BaseModel):
 class GoalUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     status: Literal["not_started", "active", "blocked", "paused", "completed", "abandoned"] | None = None
+
+
+class GoalMilestoneCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    due_date: date | None = None
+
+
+class GoalMilestoneUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    due_date: date | None = None
+    status: Literal["open", "completed", "abandoned"] | None = None
 
 
 class ProjectCreate(BaseModel):
@@ -65,6 +76,20 @@ def _resource(resource: Any) -> dict[str, Any]:
     return values
 
 
+def _goal_resource(session: Session, goal: Goal) -> dict[str, Any]:
+    milestones = list(
+        session.scalars(select(GoalMilestone).where(GoalMilestone.goal_id == goal.id).order_by(GoalMilestone.id))
+    )
+    result = _resource(goal)
+    result["milestones_total"] = len(milestones)
+    result["milestones_completed"] = sum(item.status == "completed" for item in milestones)
+    result["progress"] = (
+        round(result["milestones_completed"] / result["milestones_total"] * 100, 1) if milestones else None
+    )
+    result["milestones"] = [_resource(item) for item in milestones]
+    return result
+
+
 def _audit(
     session: Session, entity_type: str, entity_id: int, action: str, actor: str, payload: dict[str, Any]
 ) -> None:
@@ -81,7 +106,7 @@ def _audit(
 
 @router.get("/goals")
 def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return [_resource(goal) for goal in session.scalars(select(Goal).order_by(Goal.id))]
+    return [_goal_resource(session, goal) for goal in session.scalars(select(Goal).order_by(Goal.id))]
 
 
 @router.post("/goals", status_code=status.HTTP_201_CREATED)
@@ -94,7 +119,7 @@ def create_goal(
     _audit(session, "goal", goal.id, "created", actor, {"title": goal.title})
     session.commit()
     session.refresh(goal)
-    return _resource(goal)
+    return _goal_resource(session, goal)
 
 
 @router.patch("/goals/{goal_id}")
@@ -109,7 +134,47 @@ def update_goal(
     _audit(session, "goal", goal.id, "updated", actor, payload.model_dump(exclude_unset=True))
     session.commit()
     session.refresh(goal)
-    return _resource(goal)
+    return _goal_resource(session, goal)
+
+
+@router.post("/goals/{goal_id}/milestones", status_code=status.HTTP_201_CREATED)
+def create_milestone(
+    goal_id: int,
+    payload: GoalMilestoneCreate,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if session.get(Goal, goal_id) is None:
+        raise HTTPException(status_code=404, detail="Goal not found")
+    milestone = GoalMilestone(goal_id=goal_id, title=payload.title.strip(), due_date=payload.due_date)
+    session.add(milestone)
+    session.flush()
+    _audit(session, "goal_milestone", milestone.id, "created", actor, payload.model_dump())
+    session.commit()
+    session.refresh(milestone)
+    return _resource(milestone)
+
+
+@router.patch("/goals/{goal_id}/milestones/{milestone_id}")
+def update_milestone(
+    goal_id: int,
+    milestone_id: int,
+    payload: GoalMilestoneUpdate,
+    actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    milestone = session.get(GoalMilestone, milestone_id)
+    if milestone is None or milestone.goal_id != goal_id:
+        raise HTTPException(status_code=404, detail="Milestone not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(milestone, field, value.strip() if field == "title" and isinstance(value, str) else value)
+    if "status" in changes:
+        milestone.completed_at = datetime.now(timezone.utc) if changes["status"] == "completed" else None
+    _audit(session, "goal_milestone", milestone.id, "updated", actor, changes)
+    session.commit()
+    session.refresh(milestone)
+    return _resource(milestone)
 
 
 @router.get("/projects")
