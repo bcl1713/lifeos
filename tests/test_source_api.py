@@ -14,7 +14,12 @@ def test_source_resolution_is_bounded_and_read_only(tmp_path, monkeypatch) -> No
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
 
-    assert client.get("/api/sources/wiki", params={"path": "note.md"}).json()["available"] is True
-    assert client.get("/api/sources/wiki", params={"path": "missing.md"}).json()["available"] is False
-    traversal = client.get("/api/sources/wiki", params={"path": "../secret"})
-    assert traversal.status_code == 400
+    content = client.get("/api/sources/wiki/content", params={"path": "note.md"})
+    assert content.status_code == 200
+    assert content.json()["content"] == "private note"
+    listing = client.get("/api/sources/wiki/list", params={"prefix": "", "limit": 10})
+    assert listing.status_code == 200
+    assert listing.json()[0]["path"] == "note.md"
+    assert client.get("/api/sources/wiki/content", params={"path": "missing.md"}).json()["available"] is False
+    assert client.get("/api/sources/wiki/list", params={"prefix": "../"}).status_code == 400
+    assert client.get("/api/sources/wiki/content", params={"path": "../secret"}).status_code == 400
