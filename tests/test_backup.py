@@ -37,7 +37,12 @@ def test_backup_restores_task_and_audit_history(tmp_path) -> None:
         origin.backup(destination)
         destination.commit()
 
-    assert verify_backup(restored) == {"tasks": 1, "audit_records": 1}
+    assert verify_backup(restored) == {
+        "tasks": 1,
+        "audit_records": 1,
+        "metric_definitions": 0,
+        "metric_entries": 0,
+    }
     engine = create_engine(f"sqlite:///{restored}")
     with create_session_factory(engine)() as session:
         assert session.scalar(select(Task).where(Task.title == "Back up LifeOS")) is not None

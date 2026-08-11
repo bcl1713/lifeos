@@ -17,9 +17,8 @@ REQUIRED_TABLES = {
     "projects",
     "routines",
     "audit_records",
-    "metric_definitions",
-    "metric_entries",
 }
+OPTIONAL_TABLES = {"metric_definitions", "metric_entries"}
 
 
 def verify_backup(database: Path) -> dict[str, int]:
@@ -33,10 +32,13 @@ def verify_backup(database: Path) -> dict[str, int]:
         missing = REQUIRED_TABLES - tables
         if missing:
             raise RuntimeError(f"missing_tables={','.join(sorted(missing))}")
-        return {
+        counts = {
             "tasks": connection.execute("SELECT COUNT(*) FROM tasks").fetchone()[0],
             "audit_records": connection.execute("SELECT COUNT(*) FROM audit_records").fetchone()[0],
         }
+        for table in OPTIONAL_TABLES & tables:
+            counts[table] = connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        return counts
 
 
 def main() -> None:
