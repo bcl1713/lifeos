@@ -18,6 +18,44 @@ def test_advanced_routine_cadences() -> None:
         raise AssertionError("invalid interval was accepted")
 
 
+def test_minimum_frequency_compliance_reporting(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Compliance"}).json()
+    routine = client.post(
+        "/api/routines",
+        json={
+            "title": "Read",
+            "cadence": "daily",
+            "start_date": "2026-08-10",
+            "task_list_id": task_list["id"],
+            "minimum_occurrences": 3,
+            "frequency_window_days": 7,
+        },
+    ).json()
+    rid = routine["id"]
+    assert client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()["compliance"] == "missed"
+    assert client.post(f"/api/routines/{rid}/generate", params={"on": "2026-08-12"}).json()["generated"] == 3
+    tasks = client.get("/api/tasks", params={"limit": 10}).json()
+    client.post(f"/api/tasks/{tasks[0]['id']}/complete")
+    recovering = client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()
+    assert recovering["compliance"] == "recovering"
+    client.post(f"/api/tasks/{tasks[1]['id']}/complete")
+    client.post(f"/api/tasks/{tasks[2]['id']}/complete")
+    on_target = client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()
+    assert on_target["compliance"] == "on_target"
+    ordinary = client.post(
+        "/api/routines",
+        json={"title": "No target", "cadence": "daily", "start_date": "2026-08-10", "task_list_id": task_list["id"]},
+    ).json()
+    assert client.get(f"/api/routines/{ordinary['id']}/frequency").status_code == 409
+
+
 def test_minimum_frequency_routine_configuration(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",

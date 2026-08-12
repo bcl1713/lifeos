@@ -1,13 +1,24 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, GoalMilestone, Idea, Project, Resource, Routine, RoutineSkip, TaskList
+from lifeos.domain import (
+    AuditRecord,
+    Goal,
+    GoalMilestone,
+    Idea,
+    Project,
+    Resource,
+    Routine,
+    RoutineSkip,
+    Task,
+    TaskList,
+)
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
@@ -422,6 +433,45 @@ def generate_all(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"generated": generated}
+
+
+@router.get("/routines/{routine_id}/frequency")
+def routine_frequency(
+    routine_id: int,
+    on: date | None = Query(default=None),
+    _actor: str = Depends(get_actor),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    routine = session.get(Routine, routine_id)
+    if routine is None:
+        raise HTTPException(status_code=404, detail="Routine not found")
+    if routine.minimum_occurrences is None or routine.frequency_window_days is None:
+        raise HTTPException(status_code=409, detail="Routine has no minimum-frequency target")
+    end_date = on or date.today()
+    start_date = end_date - timedelta(days=routine.frequency_window_days - 1)
+    completed = (
+        session.scalar(
+            select(func.count(Task.id)).where(
+                Task.routine_id == routine_id,
+                Task.status == "completed",
+                Task.due_date >= start_date,
+                Task.due_date <= end_date,
+            )
+        )
+        or 0
+    )
+    required = routine.minimum_occurrences
+    compliance = "on_target" if completed >= required else "recovering" if completed > 0 else "missed"
+    return {
+        "routine_id": routine_id,
+        "window_start": start_date,
+        "window_end": end_date,
+        "window_days": routine.frequency_window_days,
+        "required_occurrences": required,
+        "completed_occurrences": completed,
+        "remaining_occurrences": max(required - completed, 0),
+        "compliance": compliance,
+    }
 
 
 @router.post("/routines/{routine_id}/skip", status_code=status.HTTP_201_CREATED)
