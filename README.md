@@ -23,6 +23,7 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - Phase 7 skill validation: `python scripts/validate_phase7_skills.py ~/.hermes/skills` checks the six required LifeOS skills and their contract sections.
 - Phase 8 deployment validation: `python scripts/validate_phase8_deployment.py .` checks the private application repository, recovery tooling, image/health contract, and runtime identity pattern.
 - Phase 9 cutover validation: `python scripts/validate_phase9_cutover.py /home/brian/wiki ~/.hermes/cron` checks LifeOS task authority and rejects scheduled Google Tasks writers.
+- Phase 10 test validation: `python scripts/validate_phase10_tests.py .` checks the required focused test matrix, recovery artifacts, and source secret hygiene.
 
 ## Local development
 
