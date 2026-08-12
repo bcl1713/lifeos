@@ -21,6 +21,7 @@ from lifeos.domain import (
 )
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
+from lifeos.wiki_store import WikiConflictError, WikiRepository
 
 router = APIRouter(prefix="/api")
 
@@ -48,6 +49,7 @@ class GoalUpdate(BaseModel):
     review_cadence: str | None = Field(default=None, max_length=100)
     review_date: date | None = None
     adjustment_trigger: str | None = None
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class GoalMilestoneCreate(BaseModel):
@@ -86,6 +88,7 @@ class ProjectUpdate(BaseModel):
     review_trigger: str | None = None
     source_refs: str | None = None
     goal_id: int | None = None
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class ResourceCreate(BaseModel):
@@ -154,6 +157,7 @@ class RoutineUpdate(BaseModel):
     goal_id: int | None = None
     minimum_occurrences: int | None = Field(default=None, ge=1, le=31)
     frequency_window_days: int | None = Field(default=None, ge=1, le=365)
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class RoutineSkipCreate(BaseModel):
@@ -204,6 +208,21 @@ def _audit(
     )
 
 
+def _wiki_sync(session: Session, item: Any, record_type: str, expected_hash: str | None = None) -> None:
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        return
+    excluded = {"id", "created_at", "updated_at", "wiki_id", "wiki_path", "wiki_hash", "title"}
+    fields = {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in excluded}
+    fields["id"] = item.wiki_id or f"{record_type[:3]}-{item.id}"
+    existing = repository.find_by_id(item.wiki_id) if item.wiki_id else repository.find_by_title(record_type, item.title)
+    if existing is not None:
+        item.wiki_id, item.wiki_path = existing.record_id, existing.path
+        fields["id"] = existing.record_id
+    record = repository.write(record_type, item.title, fields, path=item.wiki_path, expected_hash=expected_hash)
+    item.wiki_id, item.wiki_path, item.wiki_hash = record.record_id, record.path, record.content_hash
+
+
 @router.get("/goals")
 def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
     return [_goal_resource(session, goal) for goal in session.scalars(select(Goal).order_by(Goal.id))]
@@ -218,6 +237,7 @@ def create_goal(
     goal = Goal(**values)
     session.add(goal)
     session.flush()
+    _wiki_sync(session, goal, "goal")
     _audit(session, "goal", goal.id, "created", actor, values)
     session.commit()
     session.refresh(goal)
@@ -231,9 +251,16 @@ def update_goal(
     goal = session.get(Goal, goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    changes = payload.model_dump(exclude_unset=True)
+    expected_hash = changes.pop("expected_hash", None)
+    for field, value in changes.items():
         setattr(goal, field, value.strip() if isinstance(value, str) and field == "title" else value)
-    _audit(session, "goal", goal.id, "updated", actor, payload.model_dump(exclude_unset=True))
+    try:
+        _wiki_sync(session, goal, "goal", expected_hash)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    _audit(session, "goal", goal.id, "updated", actor, changes)
     session.commit()
     session.refresh(goal)
     return _goal_resource(session, goal)
@@ -294,6 +321,7 @@ def create_project(
     project = Project(**values)
     session.add(project)
     session.flush()
+    _wiki_sync(session, project, "project")
     _audit(session, "project", project.id, "created", actor, values)
     session.commit()
     session.refresh(project)
@@ -308,9 +336,15 @@ def update_project(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
     changes = payload.model_dump(exclude_unset=True)
+    expected_hash = changes.pop("expected_hash", None)
     _require_goal(session, changes.get("goal_id", project.goal_id))
     for field, value in changes.items():
         setattr(project, field, value.strip() if isinstance(value, str) and field == "title" else value)
+    try:
+        _wiki_sync(session, project, "project", expected_hash)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _audit(session, "project", project.id, "updated", actor, changes)
     session.commit()
     session.refresh(project)
@@ -416,6 +450,7 @@ def create_routine(
     )
     session.add(routine)
     session.flush()
+    _wiki_sync(session, routine, "routine")
     _audit(session, "routine", routine.id, "created", actor, {"title": routine.title, "cadence": routine.cadence})
     session.commit()
     session.refresh(routine)
@@ -513,17 +548,21 @@ def update_routine(
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
     changes = payload.model_dump(exclude_unset=True)
+    expected_hash = changes.pop("expected_hash", None)
     _require_goal(session, changes.get("goal_id", routine.goal_id))
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     minimum = changes.get("minimum_occurrences", routine.minimum_occurrences)
     window = changes.get("frequency_window_days", routine.frequency_window_days)
     if (minimum is None) != (window is None) or (minimum is not None and minimum > window):
-        raise HTTPException(
-            status_code=422, detail="minimum_occurrences and frequency_window_days must be provided together"
-        )
+        raise HTTPException(status_code=422, detail="minimum_occurrences and frequency_window_days must be provided together")
     for field, value in changes.items():
         setattr(routine, field, value.strip() if isinstance(value, str) and field in {"title", "cadence"} else value)
+    try:
+        _wiki_sync(session, routine, "routine", expected_hash)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     _audit(session, "routine", routine.id, "updated", actor, changes)
     session.commit()
     session.refresh(routine)

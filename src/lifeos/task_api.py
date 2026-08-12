@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskDependency, TaskList, utcnow
+from lifeos.wiki_store import WikiConflictError, WikiRepository
 
 router = APIRouter(prefix="/api")
 
@@ -43,6 +44,7 @@ class TaskUpdate(BaseModel):
     project_id: int | None = None
     routine_id: int | None = None
     parent_id: int | None = None
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class TaskDependencyCreate(BaseModel):
@@ -51,6 +53,7 @@ class TaskDependencyCreate(BaseModel):
 
 def get_session(request: Request):
     with request.app.state.session_factory() as session:
+        session.info["wiki_repository"] = request.app.state.wiki_repository
         yield session
 
 
@@ -83,6 +86,9 @@ def serialize_task(task: Task) -> dict[str, Any]:
         "project_id": task.project_id,
         "routine_id": task.routine_id,
         "parent_id": task.parent_id,
+        "wiki_id": task.wiki_id,
+        "wiki_path": task.wiki_path,
+        "wiki_hash": task.wiki_hash,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
     }
@@ -98,6 +104,32 @@ def add_audit(session: Session, *, task_id: int, action: str, actor: str, payloa
             payload=json.dumps(payload, default=str, sort_keys=True),
         )
     )
+
+
+def sync_task_to_wiki(session: Session, task: Task, expected_hash: str | None = None) -> None:
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        return
+    fields = {
+        "id": task.wiki_id or f"tsk-{task.id}",
+        "status": task.status,
+        "notes": task.notes,
+        "priority": task.priority,
+        "tags": json.loads(task.tags or "[]"),
+        "source_ref": task.source_ref,
+        "due_date": task.due_date,
+        "task_list_id": task.task_list_id,
+        "goal_id": task.goal_id,
+        "project_id": task.project_id,
+        "routine_id": task.routine_id,
+        "parent_id": task.parent_id,
+    }
+    existing = repository.find_by_id(task.wiki_id) if task.wiki_id else repository.find_by_title("task", task.title)
+    if existing is not None:
+        task.wiki_id, task.wiki_path = existing.record_id, existing.path
+        fields["id"] = existing.record_id
+    record = repository.write("task", task.title, fields, path=task.wiki_path, expected_hash=expected_hash)
+    task.wiki_id, task.wiki_path, task.wiki_hash = record.record_id, record.path, record.content_hash
 
 
 def validate_task_links(session: Session, values: dict[str, Any]) -> None:
@@ -162,6 +194,7 @@ def create_task(
     session.add(task)
     try:
         session.flush()
+        sync_task_to_wiki(session, task)
         add_audit(session, task_id=task.id, action="created", actor=actor, payload=payload.model_dump())
         session.commit()
     except IntegrityError as exc:
@@ -182,6 +215,7 @@ def update_task(
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     changes = payload.model_dump(exclude_unset=True)
+    expected_hash = changes.pop("expected_hash", None)
     if "tags" in changes:
         changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
@@ -191,11 +225,12 @@ def update_task(
         setattr(task, field, value)
     try:
         session.flush()
+        sync_task_to_wiki(session, task, expected_hash)
         add_audit(session, task_id=task.id, action="updated", actor=actor, payload=changes)
         session.commit()
-    except IntegrityError as exc:
+    except WikiConflictError as exc:
         session.rollback()
-        raise HTTPException(status_code=409, detail="Task already exists in this task list") from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.refresh(task)
     return serialize_task(task)
 
@@ -263,6 +298,7 @@ def _set_task_status(session: Session, *, task_id: int, status_value: str, actio
             )
     task.status = status_value
     task.updated_at = utcnow()
+    sync_task_to_wiki(session, task)
     add_audit(session, task_id=task.id, action=action, actor=actor, payload={"status": status_value})
     session.commit()
     session.refresh(task)

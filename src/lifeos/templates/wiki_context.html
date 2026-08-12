@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block title %}Wiki Context · LifeOS{% endblock %}
 {% block content %}
-<h1>Wiki Context</h1>
-<p class="muted">Derived, read-only index of canonical Projects and Areas. Details remain in the wiki.</p>
+<h1>Wiki</h1>
+<p class="muted">Canonical wiki Projects and Areas, exposed here as a read-only navigation view. Create and edit durable content in the wiki-backed portal; LifeOS operational changes write back to the same Markdown records.</p>
 {% for source_type, label in [("project", "Projects"), ("area", "Areas")] %}
 <section class="card">
   <h2>{{ label }}</h2>

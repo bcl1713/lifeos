@@ -41,3 +41,16 @@ def list_wiki_context(
     if not include_stale:
         query = query.where(WikiContextItem.stale.is_(False))
     return [_item(item) for item in session.scalars(query)]
+
+
+@router.post("/wiki-sync")
+def sync_wiki(
+    _actor: str = Depends(get_actor),
+    session=Depends(get_session),
+) -> dict[str, int]:
+    from lifeos.scripts_bridge import sync_wiki_projection
+
+    repository = session.info.get("wiki_repository")
+    if repository is None:
+        return {"created": 0, "updated": 0, "stale": 0, "unchanged": 0}
+    return sync_wiki_projection(session, repository)

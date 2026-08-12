@@ -4,6 +4,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, 
 from pydantic import BaseModel
 
 from lifeos import __version__
+from lifeos.area_api import router as area_router
 from lifeos.auth import AuthService
 from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
@@ -30,6 +31,7 @@ def create_app(
     agent_token: str | None = None,
     scheduler_enabled: bool | None = None,
     scheduler_interval_seconds: int | None = None,
+    wiki_root: str | None = None,
 ) -> FastAPI:
     database_url = database_url or os.getenv("DATABASE_URL", "sqlite:///./data/lifeos.db")
     engine = create_engine(database_url)
@@ -62,7 +64,12 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.scheduler_timezone = os.getenv("LIFEOS_TIMEZONE", "America/Chicago")
     app.state.scheduler_interval_seconds = scheduler_interval_seconds
+    from lifeos.wiki_store import WikiRepository
+
+    configured_wiki_root = wiki_root or os.getenv("LIFEOS_WIKI_ROOT")
+    app.state.wiki_repository = WikiRepository(configured_wiki_root) if configured_wiki_root else None
     app.include_router(context_router)
+    app.include_router(area_router)
     app.include_router(task_router)
     app.include_router(metric_router)
     app.include_router(source_router)

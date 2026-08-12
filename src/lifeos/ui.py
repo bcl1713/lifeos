@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
+from lifeos.task_api import sync_task_to_wiki
+from lifeos.wiki_store import WikiRepository
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -15,6 +17,7 @@ templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 def get_session(request: Request):
     with request.app.state.session_factory() as session:
+        session.info["wiki_repository"] = request.app.state.wiki_repository
         yield session
 
 
@@ -122,6 +125,7 @@ def create_ui_task(
     task = Task(title=title.strip(), notes=notes.strip() or None, due_date=parsed_due_date, task_list_id=task_list_id)
     session.add(task)
     session.flush()
+    sync_task_to_wiki(session, task)
     session.add(
         AuditRecord(entity_type="task", entity_id=task.id, action="created", actor=username, payload='{"source":"web"}')
     )
@@ -170,6 +174,7 @@ def _set_ui_status(task_id: int, status_value: str, action: str, username: str, 
         raise HTTPException(status_code=404, detail="Task not found")
     task.status = status_value
     task.updated_at = utcnow()
+    sync_task_to_wiki(session, task)
     session.add(
         AuditRecord(
             entity_type="task",
@@ -213,7 +218,12 @@ def goals_page(
 def create_ui_goal(
     title: str = Form(...), username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> RedirectResponse:
-    session.add(Goal(title=title.strip()))
+    goal = Goal(title=title.strip())
+    session.add(goal)
+    session.flush()
+    from lifeos.context_api import _wiki_sync
+
+    _wiki_sync(session, goal, "goal")
     session.commit()
     return RedirectResponse("/goals", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -243,7 +253,12 @@ def create_ui_project(
     parsed_goal = int(goal_id) if goal_id else None
     if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    session.add(Project(title=title.strip(), goal_id=parsed_goal))
+    project = Project(title=title.strip(), goal_id=parsed_goal)
+    session.add(project)
+    session.flush()
+    from lifeos.context_api import _wiki_sync
+
+    _wiki_sync(session, project, "project")
     session.commit()
     return RedirectResponse("/projects", status_code=status.HTTP_303_SEE_OTHER)
 
@@ -279,15 +294,18 @@ def create_ui_routine(
     parsed_goal = int(goal_id) if goal_id else None
     if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    session.add(
-        Routine(
+    routine = Routine(
             title=title.strip(),
             cadence=cadence.strip(),
             next_run_date=date.fromisoformat(start_date),
             task_list_id=task_list_id,
             goal_id=parsed_goal,
-        )
     )
+    session.add(routine)
+    session.flush()
+    from lifeos.context_api import _wiki_sync
+
+    _wiki_sync(session, routine, "routine")
     session.commit()
     return RedirectResponse("/routines", status_code=status.HTTP_303_SEE_OTHER)
 

@@ -71,6 +71,9 @@ class Goal(Base):
     review_cadence: Mapped[Optional[str]] = mapped_column(String(100))
     review_date: Mapped[Optional[date]] = mapped_column(Date)
     adjustment_trigger: Mapped[Optional[str]] = mapped_column(Text)
+    wiki_id: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
+    wiki_path: Mapped[Optional[str]] = mapped_column(String(500))
+    wiki_hash: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -114,6 +117,9 @@ class Project(Base):
     review_trigger: Mapped[Optional[str]] = mapped_column(Text)
     source_refs: Mapped[Optional[str]] = mapped_column(Text)
     goal_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"))
+    wiki_id: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
+    wiki_path: Mapped[Optional[str]] = mapped_column(String(500))
+    wiki_hash: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -189,6 +195,9 @@ class Routine(Base):
     frequency_window_days: Mapped[Optional[int]] = mapped_column(Integer)
     task_list_id: Mapped[int] = mapped_column(ForeignKey("task_lists.id", ondelete="CASCADE"), nullable=False)
     goal_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"))
+    wiki_id: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
+    wiki_path: Mapped[Optional[str]] = mapped_column(String(500))
+    wiki_hash: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
@@ -230,6 +239,9 @@ class Task(Base):
     routine_id: Mapped[Optional[int]] = mapped_column(ForeignKey("routines.id", ondelete="SET NULL"))
     occurrence_key: Mapped[Optional[str]] = mapped_column(String(180), unique=True)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    wiki_id: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
+    wiki_path: Mapped[Optional[str]] = mapped_column(String(500))
+    wiki_hash: Mapped[Optional[str]] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False

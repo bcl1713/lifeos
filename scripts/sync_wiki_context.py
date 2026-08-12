@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,12 +62,35 @@ def _item(path: Path, wiki_root: Path) -> dict[str, object] | None:
     }
 
 
+def _canonical_index_paths(root: Path) -> set[Path]:
+    paths: set[Path] = set()
+    for category in ("01-Projects", "02-Areas"):
+        index = root / category / "index.md"
+        if not index.exists():
+            continue
+        text = index.read_text(encoding="utf-8", errors="replace")
+        for raw in re.findall(r"\[\[([^]|]+)(?:\|[^]]+)?\]\]", text):
+            candidate = (root / raw.strip()).resolve()
+            if candidate.suffix.casefold() != ".md":
+                candidate = candidate.with_name(candidate.name + ".md")
+            if candidate.exists() and candidate.is_file():
+                paths.add(candidate)
+            elif candidate.is_dir():
+                paths.update(child for child in candidate.iterdir() if child.name.casefold() == "index.md")
+    return paths
+
+
 def sync_wiki_context(database_url: str, wiki_root: str | Path) -> dict[str, int]:
     root = Path(wiki_root).resolve()
     engine = create_engine(database_url)
     initialize_database(engine)
     factory = create_session_factory(engine)
-    discovered = {item["source_id"]: item for path in root.rglob("index.md") if (item := _item(path, root))}
+    canonical = _canonical_index_paths(root)
+    discovered = {
+        item["source_id"]: item
+        for path in canonical
+        if (item := _item(path, root))
+    }
     counts = {"created": 0, "updated": 0, "stale": 0, "unchanged": 0}
     with factory() as session:
         existing = {item.source_id: item for item in session.scalars(select(WikiContextItem))}
