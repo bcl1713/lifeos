@@ -52,12 +52,28 @@ class GoalMilestoneUpdate(BaseModel):
 
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    owner: str | None = Field(default=None, max_length=200)
+    collaborators: str | None = None
+    scope: str | None = None
+    non_goals: str | None = None
+    risks: str | None = None
+    deadline: date | None = None
+    review_trigger: str | None = None
+    source_refs: str | None = None
     goal_id: int | None = None
 
 
 class ProjectUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     status: Literal["active", "blocked", "paused", "completed", "abandoned", "archived"] | None = None
+    owner: str | None = Field(default=None, max_length=200)
+    collaborators: str | None = None
+    scope: str | None = None
+    non_goals: str | None = None
+    risks: str | None = None
+    deadline: date | None = None
+    review_trigger: str | None = None
+    source_refs: str | None = None
     goal_id: int | None = None
 
 
@@ -217,10 +233,12 @@ def create_project(
     payload: ProjectCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
     _require_goal(session, payload.goal_id)
-    project = Project(title=payload.title.strip(), goal_id=payload.goal_id)
+    values = payload.model_dump()
+    values["title"] = values["title"].strip()
+    project = Project(**values)
     session.add(project)
     session.flush()
-    _audit(session, "project", project.id, "created", actor, {"title": project.title, "goal_id": project.goal_id})
+    _audit(session, "project", project.id, "created", actor, values)
     session.commit()
     session.refresh(project)
     return _resource(project)

@@ -34,9 +34,22 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
 
     project = client.post(
         "/api/projects",
-        json={"title": "LifeOS implementation", "goal_id": goal_id},
+        json={
+            "title": "LifeOS implementation",
+            "owner": "Brian",
+            "collaborators": "Hester",
+            "scope": "Canonical task and context workflows",
+            "non_goals": "Public multi-tenant service",
+            "risks": "Migration drift",
+            "deadline": "2026-12-31",
+            "review_trigger": "Phase acceptance audit",
+            "source_refs": "lifeos-project-note",
+            "goal_id": goal_id,
+        },
     )
     assert project.status_code == 201
+    assert project.json()["scope"] == "Canonical task and context workflows"
+    assert project.json()["deadline"] == "2026-12-31"
     project_id = project.json()["id"]
 
     task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
