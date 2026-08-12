@@ -18,7 +18,20 @@ def advance_occurrence(value: date, cadence: str) -> date:
         year = value.year + (month - 1) // 12
         month = (month - 1) % 12 + 1
         return date(year, month, min(value.day, calendar.monthrange(year, month)[1]))
-    raise ValueError("Unsupported cadence; use daily, weekly, or monthly")
+    if cadence.startswith("interval:"):
+        days = int(cadence.removeprefix("interval:"))
+        if days < 1:
+            raise ValueError("Interval cadence must be at least one day")
+        return value + timedelta(days=days)
+    if cadence.startswith("weekdays:"):
+        weekdays = {int(item) for item in cadence.removeprefix("weekdays:").split(",") if item != ""}
+        if not weekdays or not weekdays <= set(range(7)):
+            raise ValueError("Weekday cadence must use comma-separated days 0 through 6")
+        candidate = value + timedelta(days=1)
+        while candidate.weekday() not in weekdays:
+            candidate += timedelta(days=1)
+        return candidate
+    raise ValueError("Unsupported cadence; use daily, weekly, monthly, interval:N, or weekdays:0,2,4")
 
 
 def generate_routine_tasks(session: Session, routine: Routine, through: date, actor: str) -> int:

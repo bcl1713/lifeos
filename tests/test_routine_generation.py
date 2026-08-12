@@ -1,6 +1,21 @@
 from fastapi.testclient import TestClient
 
 from lifeos.main import create_app
+from lifeos.routine_service import advance_occurrence
+
+
+def test_advanced_routine_cadences() -> None:
+    from datetime import date
+
+    assert advance_occurrence(date(2026, 8, 14), "weekdays:0,2,4") == date(2026, 8, 17)
+    assert advance_occurrence(date(2026, 8, 12), "weekdays:0,2,4") == date(2026, 8, 14)
+    assert advance_occurrence(date(2026, 8, 12), "interval:3") == date(2026, 8, 15)
+    try:
+        advance_occurrence(date(2026, 8, 12), "interval:0")
+    except ValueError as exc:
+        assert "at least one day" in str(exc)
+    else:
+        raise AssertionError("invalid interval was accepted")
 
 
 def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
