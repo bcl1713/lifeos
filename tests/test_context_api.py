@@ -52,6 +52,38 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
     assert project.json()["deadline"] == "2026-12-31"
     project_id = project.json()["id"]
 
+    resource = client.post(
+        "/api/resources",
+        json={
+            "title": "LifeOS design reference",
+            "canonical_url": "https://example.com/lifeos",
+            "resource_type": "documentation",
+            "description": "Reference material",
+            "accessed_at": "2026-08-12",
+            "source_refs": "source-1",
+        },
+    )
+    assert resource.status_code == 201
+    assert resource.json()["canonical_url"] == "https://example.com/lifeos"
+    idea = client.post(
+        "/api/ideas",
+        json={
+            "title": "Promote resource-backed workflow",
+            "rationale": "Reduce context loss",
+            "experiment": "Try a weekly review",
+            "next_action": "Draft checklist",
+            "source_refs": "source-1",
+            "project_id": project_id,
+        },
+    )
+    assert idea.status_code == 201
+    assert idea.json()["project_id"] == project_id
+    idea_id = idea.json()["id"]
+    promoted = client.patch(f"/api/ideas/{idea_id}", json={"status": "promoted"})
+    assert promoted.status_code == 200
+    assert promoted.json()["status"] == "promoted"
+    assert client.post("/api/ideas", json={"title": "Bad link", "project_id": 9999}).status_code == 404
+
     task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
     routine = client.post(
         "/api/routines",

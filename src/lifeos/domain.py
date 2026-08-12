@@ -123,6 +123,41 @@ class Project(Base):
     tasks: Mapped[list["Task"]] = relationship(back_populates="project")
 
 
+class Resource(Base):
+    __tablename__ = "resources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    canonical_url: Mapped[Optional[str]] = mapped_column(String(1000))
+    resource_type: Mapped[Optional[str]] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    accessed_at: Mapped[Optional[date]] = mapped_column(Date)
+    source_refs: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
+class Idea(Base):
+    __tablename__ = "ideas"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="captured", nullable=False)
+    rationale: Mapped[Optional[str]] = mapped_column(Text)
+    experiment: Mapped[Optional[str]] = mapped_column(Text)
+    next_action: Mapped[Optional[str]] = mapped_column(Text)
+    source_refs: Mapped[Optional[str]] = mapped_column(Text)
+    project_id: Mapped[Optional[int]] = mapped_column(ForeignKey("projects.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False
+    )
+
+
 class Routine(Base):
     __tablename__ = "routines"
 

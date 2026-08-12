@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from lifeos.domain import AuditRecord, Goal, GoalMilestone, Project, Routine, RoutineSkip, TaskList
+from lifeos.domain import AuditRecord, Goal, GoalMilestone, Idea, Project, Resource, Routine, RoutineSkip, TaskList
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import get_actor, get_session
 
@@ -77,6 +77,46 @@ class ProjectUpdate(BaseModel):
     goal_id: int | None = None
 
 
+class ResourceCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    canonical_url: str | None = Field(default=None, max_length=1000)
+    resource_type: str | None = Field(default=None, max_length=80)
+    description: str | None = None
+    accessed_at: date | None = None
+    source_refs: str | None = None
+    notes: str | None = None
+
+
+class ResourceUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    canonical_url: str | None = Field(default=None, max_length=1000)
+    resource_type: str | None = Field(default=None, max_length=80)
+    status: Literal["active", "archived"] | None = None
+    description: str | None = None
+    accessed_at: date | None = None
+    source_refs: str | None = None
+    notes: str | None = None
+
+
+class IdeaCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=300)
+    rationale: str | None = None
+    experiment: str | None = None
+    next_action: str | None = None
+    source_refs: str | None = None
+    project_id: int | None = None
+
+
+class IdeaUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    status: Literal["captured", "exploring", "promoted", "rejected", "parked"] | None = None
+    rationale: str | None = None
+    experiment: str | None = None
+    next_action: str | None = None
+    source_refs: str | None = None
+    project_id: int | None = None
+
+
 class RoutineCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     cadence: str = Field(min_length=1, max_length=50)
@@ -113,6 +153,11 @@ class RoutineSkipCreate(BaseModel):
 def _require_goal(session: Session, goal_id: int | None) -> None:
     if goal_id is not None and session.get(Goal, goal_id) is None:
         raise HTTPException(status_code=404, detail="Goal not found")
+
+
+def _require_project(session: Session, project_id: int | None) -> None:
+    if project_id is not None and session.get(Project, project_id) is None:
+        raise HTTPException(status_code=404, detail="Project not found")
 
 
 def _resource(resource: Any) -> dict[str, Any]:
@@ -259,6 +304,80 @@ def update_project(
     session.commit()
     session.refresh(project)
     return _resource(project)
+
+
+@router.get("/resources")
+def list_resources(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return [_resource(resource) for resource in session.scalars(select(Resource).order_by(Resource.id))]
+
+
+@router.post("/resources", status_code=status.HTTP_201_CREATED)
+def create_resource(
+    payload: ResourceCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    values = payload.model_dump()
+    values["title"] = values["title"].strip()
+    resource = Resource(**values)
+    session.add(resource)
+    session.flush()
+    _audit(session, "resource", resource.id, "created", actor, values)
+    session.commit()
+    session.refresh(resource)
+    return _resource(resource)
+
+
+@router.patch("/resources/{resource_id}")
+def update_resource(
+    resource_id: int, payload: ResourceUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    resource = session.get(Resource, resource_id)
+    if resource is None:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    changes = payload.model_dump(exclude_unset=True)
+    for field, value in changes.items():
+        setattr(resource, field, value.strip() if field == "title" and isinstance(value, str) else value)
+    _audit(session, "resource", resource.id, "updated", actor, changes)
+    session.commit()
+    session.refresh(resource)
+    return _resource(resource)
+
+
+@router.get("/ideas")
+def list_ideas(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
+    return [_resource(idea) for idea in session.scalars(select(Idea).order_by(Idea.id))]
+
+
+@router.post("/ideas", status_code=status.HTTP_201_CREATED)
+def create_idea(
+    payload: IdeaCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    _require_project(session, payload.project_id)
+    values = payload.model_dump()
+    values["title"] = values["title"].strip()
+    idea = Idea(**values)
+    session.add(idea)
+    session.flush()
+    _audit(session, "idea", idea.id, "created", actor, values)
+    session.commit()
+    session.refresh(idea)
+    return _resource(idea)
+
+
+@router.patch("/ideas/{idea_id}")
+def update_idea(
+    idea_id: int, payload: IdeaUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    idea = session.get(Idea, idea_id)
+    if idea is None:
+        raise HTTPException(status_code=404, detail="Idea not found")
+    changes = payload.model_dump(exclude_unset=True)
+    _require_project(session, changes.get("project_id", idea.project_id))
+    for field, value in changes.items():
+        setattr(idea, field, value.strip() if field == "title" and isinstance(value, str) else value)
+    _audit(session, "idea", idea.id, "updated", actor, changes)
+    session.commit()
+    session.refresh(idea)
+    return _resource(idea)
 
 
 @router.get("/routines")
