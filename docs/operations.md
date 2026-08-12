@@ -4,11 +4,11 @@ LifeOS is deployed through the Git-backed `bcl1713/homelab-stacks` repository. D
 
 ## Live deployment
 
-- Portainer stack: `app-lifeos` (stack `167`, endpoint `3`)
+- Portainer stack: `app-lifeos` (stack `170`, endpoint `3`)
 - Git source: `https://github.com/bcl1713/homelab-stacks.git`
 - Compose path: `stacks/apps/lifeos/compose.yaml`
-- Current image: `ghcr.io/bcl1713/lifeos:v0.3.8`
-- Application release: `v0.3.8`; application commit `ae1df24`
+- Pre-cutover production image: `ghcr.io/bcl1713/lifeos:v0.5.0`
+- Target wiki-first release: `v0.6.0`; do not record it as current until live version, image, reconciliation, restart, and authenticated read-back pass.
 - Access: private LAN/Tailscale through the external `proxy` network
 - Hostname: `https://lifeos.hblucas.org`
 - Application data: `/mnt/TANK/docker/lifeos/data` → `/data`
@@ -26,9 +26,10 @@ The human password and Jarvis agent token are stored in the Vaultwarden `LifeOS`
 1. The entrypoint prepares the bind-mounted `/data` directory as root.
 2. Alembic upgrades run before Uvicorn.
 3. The application process runs as unprivileged UID/GID `100:101` (`lifeos`).
-4. SQLite uses WAL and foreign-key enforcement.
-5. Routine generation runs in the application container with idempotent occurrence keys.
-6. Restart persistence has been verified against the production bind mount.
+4. `/wiki` is the canonical durable authority for Tasks, Projects, Areas, Goals, and Routines; SQLite uses WAL and foreign-key enforcement only as a rebuildable projection, query index, and audit cache.
+5. Domain mutations write Markdown source-first. Updates require `expected_hash`; stale source produces HTTP `409` and no projection commit.
+6. Routine generation runs in the application container with idempotent canonical occurrence keys.
+7. Startup/release acceptance requires projection reconciliation, not merely a healthy SQLite file or HTTP health response.
 
 ## Backup and restore
 
@@ -58,18 +59,72 @@ docker exec app-lifeos-lifeos-1 \
 
 Retention policy: **30 daily / 12 monthly**. The retention tool supports a dry run and explicit `--apply`; unattended scheduling remains an infrastructure-level operational choice and is not claimed here as implemented.
 
-## Migration and task authority
+## Migration and authority
 
 The read-only Google Tasks inventory contained 2 lists and 49 records:
 
 - My Tasks: 16 — 2 open, 14 completed
 - Family Triage: 33 — 3 open, 30 completed
 
-All 49 were imported with source markers. LifeOS is now the active task authority. Google Tasks is read-only historical source data; scheduled workflows contain no Google Tasks writer commands.
+All 49 were imported with source markers during the earlier application-authority phase. That authority statement is superseded by the wiki-first model: canonical Task state now belongs in wiki Markdown, while LifeOS provides the authenticated workflow and rebuildable execution projection. Google Tasks remains read-only historical source data; scheduled workflows contain no Google Tasks writer commands.
 
 Rollback is documented: restore the read-only Google Tasks export and re-enable the retired path only if cutover verification fails. No routine writes to both systems.
 
-## Verification evidence
+## Projection reconciliation
+
+Validate the authoritative Project and Area index links separately for each dataset:
+
+```bash
+python scripts/validate_wiki_links.py /home/brian/wiki
+python scripts/validate_wiki_links.py /wiki
+```
+
+The validator resolves extensionless and mixed-case final `Index.md` components, rejects traversal, and reports missing or ambiguous targets without mutating the wiki.
+
+Run a non-mutating check before and after rebuild, release, restart, or recovery:
+
+```bash
+python scripts/sync_wiki_projection.py \
+  --database sqlite:///./data/lifeos.db \
+  --wiki-root /wiki \
+  --check
+```
+
+The command exits `0` only when canonical source and projection align. Missing, orphaned, duplicate, stale-hash, type/path-conflict, missing-identity, or invalid-link records must be resolved or explicitly waived before deployment acceptance.
+
+Rebuild only after verified wiki and SQLite backups:
+
+```bash
+python scripts/sync_wiki_projection.py \
+  --database sqlite:///./data/lifeos.db \
+  --wiki-root /wiki
+```
+
+Sync refuses duplicate canonical IDs before projection mutation and never adopts an unidentified legacy row by title. Stable wiki ID and canonical path—not title resemblance—control identity.
+
+Before the first writable wiki cutover, canonicalize any application-only domain rows using the dry-run-first migration command:
+
+```bash
+python scripts/canonicalize_legacy_projection.py \
+  --database sqlite:////data/lifeos.db \
+  --wiki-root /wiki
+
+# Only after verified SQLite and wiki backups plus a successful rehearsal:
+python scripts/canonicalize_legacy_projection.py \
+  --database sqlite:////data/lifeos.db \
+  --wiki-root /wiki \
+  --apply
+```
+
+The migration assigns deterministic non-title IDs, records projection-row provenance, writes canonical Markdown before updating identities, preserves relationships and related state, and is safe to rerun after a partial interruption.
+
+**Local 2026-08-12 rehearsal:** `/home/brian/wiki` produced 22 canonical records (12 Projects and 10 Areas); a fresh Alembic-head database rebuilt 22 projection records with zero unexplained discrepancies and SQLite integrity `ok`. This is local evidence only. Production source counts and reconciliation must be measured separately during rollout.
+
+**Production-copy 2026-08-12 rehearsal:** a hash-verified online copy of the live `v0.5.0` SQLite database and a hash-verified wiki archive were used without modifying production. Dry-run identified 77 application-only rows (2 Goals, 3 Projects, 4 Routines, and 68 Tasks). Apply created 77 canonical records, an idempotent rerun created zero, and an empty Alembic-head database rebuilt 99/99 records with zero reconciliation discrepancies and zero semantic differences across the migrated records. This proves the migration path only; fresh live backups, production apply, writable deployment, and authenticated acceptance remain separate gates.
+
+## Historical production verification snapshot
+
+The following evidence describes release `v0.3.8`; it is retained for older rollback history and must not be read as proof of the current `v0.5.0` baseline or wiki-first release:
 
 - `https://lifeos.hblucas.org/healthz`: HTTP `200`, version `0.3.8`
 - Browser `/auth/me`, `/`, `/tasks`: HTTP `200`

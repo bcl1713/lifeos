@@ -19,14 +19,21 @@ REQUIRED_FILES = (
     "scripts/restore_lifeos.py",
     "scripts/export_lifeos.py",
     "scripts/validate_phase10_tests.py",
+    "scripts/validate_authority_docs.py",
+    "scripts/validate_wiki_links.py",
+    "scripts/canonicalize_legacy_projection.py",
 )
 REQUIRED_DOC_PHRASES = (
-    "v0.3.8",
     "Git-backed",
     "lifeos.hblucas.org",
     "30 daily / 12 monthly",
     "read-only historical",
-    "pre-recreation backup",
+    "canonical durable authority",
+    "source-first",
+    "expected_hash",
+    "projection reconciliation",
+    "canonicalize_legacy_projection.py",
+    "validate_wiki_links.py",
 )
 
 

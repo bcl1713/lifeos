@@ -23,6 +23,7 @@ def test_minimum_frequency_compliance_reporting(tmp_path) -> None:
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -42,11 +43,11 @@ def test_minimum_frequency_compliance_reporting(tmp_path) -> None:
     assert client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()["compliance"] == "missed"
     assert client.post(f"/api/routines/{rid}/generate", params={"on": "2026-08-12"}).json()["generated"] == 3
     tasks = client.get("/api/tasks", params={"limit": 10}).json()
-    client.post(f"/api/tasks/{tasks[0]['id']}/complete")
+    client.post(f"/api/tasks/{tasks[0]['id']}/complete", params={"expected_hash": tasks[0]["wiki_hash"]})
     recovering = client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()
     assert recovering["compliance"] == "recovering"
-    client.post(f"/api/tasks/{tasks[1]['id']}/complete")
-    client.post(f"/api/tasks/{tasks[2]['id']}/complete")
+    client.post(f"/api/tasks/{tasks[1]['id']}/complete", params={"expected_hash": tasks[1]["wiki_hash"]})
+    client.post(f"/api/tasks/{tasks[2]['id']}/complete", params={"expected_hash": tasks[2]["wiki_hash"]})
     on_target = client.get(f"/api/routines/{rid}/frequency", params={"on": "2026-08-16"}).json()
     assert on_target["compliance"] == "on_target"
     ordinary = client.post(
@@ -61,6 +62,7 @@ def test_minimum_frequency_routine_configuration(tmp_path) -> None:
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -92,7 +94,10 @@ def test_minimum_frequency_routine_configuration(tmp_path) -> None:
         ).status_code
         == 422
     )
-    assert client.patch(f"/api/routines/{routine.json()['id']}", json={"frequency_window_days": 2}).status_code == 422
+    assert client.patch(
+        f"/api/routines/{routine.json()['id']}",
+        json={"frequency_window_days": 2, "expected_hash": routine.json()["wiki_hash"]},
+    ).status_code == 422
 
 
 def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
@@ -100,6 +105,7 @@ def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -130,11 +136,56 @@ def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
     assert client.get("/api/routines").json()[0]["next_run_date"] == "2026-08-14"
 
 
+def test_routine_skip_requires_current_routine_hash(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'skip-conflicts.db'}",
+        auth_username="brian",
+        auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    routine = client.post(
+        "/api/routines",
+        json={
+            "title": "Skip guard",
+            "cadence": "daily",
+            "task_list_id": task_list["id"],
+            "start_date": "2026-08-11",
+        },
+    ).json()
+
+    missing = client.post(
+        f"/api/routines/{routine['id']}/skip",
+        json={"scheduled_date": "2026-08-11", "reason": "Travel"},
+    )
+    assert missing.status_code == 409
+    assert client.get(f"/api/routines/{routine['id']}/frequency").status_code == 409
+
+    created = client.post(
+        f"/api/routines/{routine['id']}/skip",
+        json={"scheduled_date": "2026-08-11", "reason": "Travel", "expected_hash": routine["wiki_hash"]},
+    )
+    assert created.status_code == 201
+    current_routine = client.get("/api/routines").json()[0]
+    stale = client.post(
+        f"/api/routines/{routine['id']}/skip",
+        json={"scheduled_date": "2026-08-12", "reason": "Still away", "expected_hash": routine["wiki_hash"]},
+    )
+    assert stale.status_code == 409
+    assert client.post(
+        f"/api/routines/{routine['id']}/skip",
+        json={"scheduled_date": "2026-08-12", "reason": "Still away", "expected_hash": current_routine["wiki_hash"]},
+    ).status_code == 201
+
+
 def test_generate_all_routines_processes_active_routines_once(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -162,6 +213,7 @@ def test_routine_skip_advances_without_creating_an_occurrence(tmp_path) -> None:
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -173,12 +225,16 @@ def test_routine_skip_advances_without_creating_an_occurrence(tmp_path) -> None:
     routine_id = routine["id"]
     skip = client.post(
         f"/api/routines/{routine_id}/skip",
-        json={"scheduled_date": "2026-08-11", "reason": "Travel"},
+        json={"scheduled_date": "2026-08-11", "reason": "Travel", "expected_hash": routine["wiki_hash"]},
     )
     assert skip.status_code == 201
     duplicate = client.post(
         f"/api/routines/{routine_id}/skip",
-        json={"scheduled_date": "2026-08-11", "reason": "Different wording"},
+        json={
+            "scheduled_date": "2026-08-11",
+            "reason": "Different wording",
+            "expected_hash": client.get("/api/routines").json()[0]["wiki_hash"],
+        },
     )
     assert duplicate.status_code == 201
     assert duplicate.json()["id"] == skip.json()["id"]

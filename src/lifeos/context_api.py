@@ -1,6 +1,7 @@
 import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, model_validator
@@ -20,8 +21,13 @@ from lifeos.domain import (
     TaskList,
 )
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
-from lifeos.task_api import get_actor, get_session
-from lifeos.wiki_store import WikiConflictError, WikiRepository
+from lifeos.task_api import (
+    get_actor,
+    get_session,
+    projection_reconciliation_required,
+    raise_reconciliation_required,
+)
+from lifeos.wiki_store import WikiConflictError, WikiReconciliationRequiredError, WikiRepository, slugify
 
 router = APIRouter(prefix="/api")
 
@@ -55,12 +61,14 @@ class GoalUpdate(BaseModel):
 class GoalMilestoneCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     due_date: date | None = None
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class GoalMilestoneUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     due_date: date | None = None
     status: Literal["open", "completed", "abandoned"] | None = None
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 class ProjectCreate(BaseModel):
@@ -163,6 +171,7 @@ class RoutineUpdate(BaseModel):
 class RoutineSkipCreate(BaseModel):
     scheduled_date: date
     reason: str | None = Field(default=None, max_length=300)
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 def _require_goal(session: Session, goal_id: int | None) -> None:
@@ -208,18 +217,63 @@ def _audit(
     )
 
 
-def _wiki_sync(session: Session, item: Any, record_type: str, expected_hash: str | None = None) -> None:
+def _wiki_sync(
+    session: Session,
+    item: Any,
+    record_type: str,
+    expected_hash: str | None = None,
+    routine_skips: list[dict[str, str | None]] | None = None,
+    goal_milestones: list[dict[str, str | None]] | None = None,
+) -> None:
     repository: WikiRepository | None = session.info.get("wiki_repository")
     if repository is None:
-        return
-    excluded = {"id", "created_at", "updated_at", "wiki_id", "wiki_path", "wiki_hash", "title"}
-    fields = {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in excluded}
-    fields["id"] = item.wiki_id or f"{record_type[:3]}-{item.id}"
-    existing = repository.find_by_id(item.wiki_id) if item.wiki_id else repository.find_by_title(record_type, item.title)
-    if existing is not None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    with session.no_autoflush:
+        excluded = {"id", "created_at", "updated_at", "wiki_id", "wiki_path", "wiki_hash", "title"}
+        fields = {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in excluded}
+        if record_type == "goal":
+            fields["milestones"] = goal_milestones if goal_milestones is not None else [
+                {
+                    "id": f"mil-{slugify(milestone.title)}",
+                    "title": milestone.title,
+                    "status": milestone.status,
+                    "due_date": milestone.due_date.isoformat() if milestone.due_date else None,
+                    "completed_at": milestone.completed_at.isoformat() if milestone.completed_at else None,
+                }
+                for milestone in item.milestones
+            ]
+        if record_type == "routine":
+            fields.pop("goal_id", None)
+            fields.pop("task_list_id", None)
+            goal = session.get(Goal, item.goal_id) if item.goal_id else None
+            task_list = session.get(TaskList, item.task_list_id)
+            fields["goal_wiki_id"] = goal.wiki_id if goal else None
+            fields["task_list"] = task_list.name if task_list else None
+            fields["skips"] = routine_skips if routine_skips is not None else [
+                {"scheduled_date": skip.scheduled_date.isoformat(), "reason": skip.reason} for skip in item.skips
+            ]
+        if record_type == "project":
+            fields.pop("goal_id", None)
+            goal = session.get(Goal, item.goal_id) if item.goal_id else None
+            fields["goal_wiki_id"] = goal.wiki_id if goal else None
+        linked = repository.read(item.wiki_path) if item.wiki_path else None
+        if linked is not None and linked.record_type != record_type:
+            raise WikiConflictError(f"Canonical wiki path is not a {record_type}")
+        if item.wiki_id:
+            existing = repository.find_by_id(item.wiki_id)
+            if existing is None:
+                raise WikiConflictError("Canonical wiki record disappeared")
+            if linked is not None and linked.record_id != existing.record_id:
+                raise WikiConflictError("Canonical wiki identity and path disagree")
+        elif linked is not None and linked.record_id:
+            existing = linked
+        else:
+            raise WikiConflictError(
+                f"Projection {record_type} has no canonical identity; canonicalization or reconciliation is required"
+            )
         item.wiki_id, item.wiki_path = existing.record_id, existing.path
         fields["id"] = existing.record_id
-    record = repository.write(record_type, item.title, fields, path=item.wiki_path, expected_hash=expected_hash)
+        record = repository.write(record_type, item.title, fields, path=item.wiki_path, expected_hash=expected_hash)
     item.wiki_id, item.wiki_path, item.wiki_hash = record.record_id, record.path, record.content_hash
 
 
@@ -234,13 +288,40 @@ def create_goal(
 ) -> dict[str, Any]:
     values = payload.model_dump()
     values["title"] = values["title"].strip()
-    goal = Goal(**values)
-    session.add(goal)
-    session.flush()
-    _wiki_sync(session, goal, "goal")
-    _audit(session, "goal", goal.id, "created", actor, values)
-    session.commit()
-    session.refresh(goal)
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    record_id = f"goal-{slugify(values['title'])}"
+    if repository.find_by_id(record_id) is not None:
+        record_id = f"{record_id}-{uuid4().hex[:8]}"
+    record = repository.write(
+        "goal",
+        values["title"],
+        {"id": record_id, **{key: value for key, value in values.items() if key != "title"}, "milestones": []},
+    )
+    goal = Goal(
+        **values,
+        wiki_id=record.record_id,
+        wiki_path=record.path,
+        wiki_hash=record.content_hash,
+    )
+    try:
+        session.add(goal)
+        session.flush()
+        _audit(session, "goal", goal.id, "created", actor, values)
+        session.commit()
+        session.refresh(goal)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": "Canonical goal was written, but the projection failed; reconciliation is required",
+                "wiki_id": record.record_id,
+                "wiki_path": record.path,
+            },
+        ) from exc
     return _goal_resource(session, goal)
 
 
@@ -253,15 +334,23 @@ def update_goal(
         raise HTTPException(status_code=404, detail="Goal not found")
     changes = payload.model_dump(exclude_unset=True)
     expected_hash = changes.pop("expected_hash", None)
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical goal mutation")
     for field, value in changes.items():
         setattr(goal, field, value.strip() if isinstance(value, str) and field == "title" else value)
     try:
         _wiki_sync(session, goal, "goal", expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
     except WikiConflictError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _audit(session, "goal", goal.id, "updated", actor, changes)
-    session.commit()
+    try:
+        _audit(session, "goal", goal.id, "updated", actor, changes)
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, goal, "goal", exc)
     session.refresh(goal)
     return _goal_resource(session, goal)
 
@@ -273,13 +362,46 @@ def create_milestone(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    if session.get(Goal, goal_id) is None:
+    goal = session.get(Goal, goal_id)
+    if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
-    milestone = GoalMilestone(goal_id=goal_id, title=payload.title.strip(), due_date=payload.due_date)
+    if not payload.expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical goal milestone mutation")
+    milestone = GoalMilestone(goal_id=goal_id, title=payload.title.strip(), status="open", due_date=payload.due_date)
     session.add(milestone)
-    session.flush()
-    _audit(session, "goal_milestone", milestone.id, "created", actor, payload.model_dump())
-    session.commit()
+    proposed_milestones = [
+        {
+            "id": f"mil-{slugify(item.title)}",
+            "title": item.title,
+            "status": item.status,
+            "due_date": item.due_date.isoformat() if item.due_date else None,
+            "completed_at": item.completed_at.isoformat() if item.completed_at else None,
+        }
+        for item in goal.milestones
+    ]
+    proposed_milestones.append(
+        {
+            "id": f"mil-{slugify(milestone.title)}",
+            "title": milestone.title,
+            "status": milestone.status,
+            "due_date": milestone.due_date.isoformat() if milestone.due_date else None,
+            "completed_at": None,
+        }
+    )
+    try:
+        _wiki_sync(session, goal, "goal", payload.expected_hash, goal_milestones=proposed_milestones)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.flush()
+        _audit(session, "goal_milestone", milestone.id, "created", actor, payload.model_dump())
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, goal, "goal", exc)
     session.refresh(milestone)
     return _resource(milestone)
 
@@ -296,12 +418,28 @@ def update_milestone(
     if milestone is None or milestone.goal_id != goal_id:
         raise HTTPException(status_code=404, detail="Milestone not found")
     changes = payload.model_dump(exclude_unset=True)
+    expected_hash = changes.pop("expected_hash", None)
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical goal milestone mutation")
     for field, value in changes.items():
         setattr(milestone, field, value.strip() if field == "title" and isinstance(value, str) else value)
     if "status" in changes:
         milestone.completed_at = datetime.now(timezone.utc) if changes["status"] == "completed" else None
-    _audit(session, "goal_milestone", milestone.id, "updated", actor, changes)
-    session.commit()
+    goal = milestone.goal
+    try:
+        _wiki_sync(session, goal, "goal", expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.flush()
+        _audit(session, "goal_milestone", milestone.id, "updated", actor, changes)
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, goal, "goal", exc)
     session.refresh(milestone)
     return _resource(milestone)
 
@@ -318,13 +456,38 @@ def create_project(
     _require_goal(session, payload.goal_id)
     values = payload.model_dump()
     values["title"] = values["title"].strip()
-    project = Project(**values)
-    session.add(project)
-    session.flush()
-    _wiki_sync(session, project, "project")
-    _audit(session, "project", project.id, "created", actor, values)
-    session.commit()
-    session.refresh(project)
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    record_id = f"prj-{slugify(values['title'])}"
+    if repository.find_by_id(record_id) is not None:
+        record_id = f"{record_id}-{uuid4().hex[:8]}"
+    source_values = {key: value for key, value in values.items() if key not in {"title", "goal_id"}}
+    source_values["goal_wiki_id"] = session.get(Goal, payload.goal_id).wiki_id if payload.goal_id else None
+    record = repository.write("project", values["title"], {"id": record_id, **source_values})
+    project = Project(
+        **values,
+        wiki_id=record.record_id,
+        wiki_path=record.path,
+        wiki_hash=record.content_hash,
+    )
+    try:
+        session.add(project)
+        session.flush()
+        _audit(session, "project", project.id, "created", actor, values)
+        session.commit()
+        session.refresh(project)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": "Canonical project was written, but the projection failed; reconciliation is required",
+                "wiki_id": record.record_id,
+                "wiki_path": record.path,
+            },
+        ) from exc
     return _resource(project)
 
 
@@ -337,16 +500,24 @@ def update_project(
         raise HTTPException(status_code=404, detail="Project not found")
     changes = payload.model_dump(exclude_unset=True)
     expected_hash = changes.pop("expected_hash", None)
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical project mutation")
     _require_goal(session, changes.get("goal_id", project.goal_id))
     for field, value in changes.items():
         setattr(project, field, value.strip() if isinstance(value, str) and field == "title" else value)
     try:
         _wiki_sync(session, project, "project", expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
     except WikiConflictError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _audit(session, "project", project.id, "updated", actor, changes)
-    session.commit()
+    try:
+        _audit(session, "project", project.id, "updated", actor, changes)
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, project, "project", exc)
     session.refresh(project)
     return _resource(project)
 
@@ -437,23 +608,61 @@ def create_routine(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     _require_goal(session, payload.goal_id)
-    if session.get(TaskList, payload.task_list_id) is None:
+    task_list = session.get(TaskList, payload.task_list_id)
+    if task_list is None:
         raise HTTPException(status_code=404, detail="Task list not found")
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    title = payload.title.strip()
+    cadence = payload.cadence.strip()
+    record_id = f"rtn-{slugify(title)}"
+    if repository.find_by_id(record_id) is not None:
+        record_id = f"{record_id}-{uuid4().hex[:8]}"
+    record = repository.write(
+        "routine",
+        title,
+        {
+            "id": record_id,
+            "status": "active",
+            "cadence": cadence,
+            "next_run_date": payload.start_date,
+            "minimum_occurrences": payload.minimum_occurrences,
+            "frequency_window_days": payload.frequency_window_days,
+            "task_list": task_list.name,
+            "goal_wiki_id": session.get(Goal, payload.goal_id).wiki_id if payload.goal_id else None,
+            "skips": [],
+        },
+    )
     routine = Routine(
-        title=payload.title.strip(),
-        cadence=payload.cadence.strip(),
+        title=title,
+        cadence=cadence,
         next_run_date=payload.start_date,
         minimum_occurrences=payload.minimum_occurrences,
         frequency_window_days=payload.frequency_window_days,
         task_list_id=payload.task_list_id,
         goal_id=payload.goal_id,
+        wiki_id=record.record_id,
+        wiki_path=record.path,
+        wiki_hash=record.content_hash,
     )
-    session.add(routine)
-    session.flush()
-    _wiki_sync(session, routine, "routine")
-    _audit(session, "routine", routine.id, "created", actor, {"title": routine.title, "cadence": routine.cadence})
-    session.commit()
-    session.refresh(routine)
+    try:
+        session.add(routine)
+        session.flush()
+        _audit(session, "routine", routine.id, "created", actor, {"title": routine.title, "cadence": routine.cadence})
+        session.commit()
+        session.refresh(routine)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": "Canonical routine was written, but the projection failed; reconciliation is required",
+                "wiki_id": record.record_id,
+                "wiki_path": record.path,
+            },
+        ) from exc
     return _resource(routine)
 
 
@@ -465,6 +674,18 @@ def generate_all(
 ) -> dict[str, int]:
     try:
         generated = generate_all_routines(session, on or date.today(), actor)
+    except WikiConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WikiReconciliationRequiredError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": str(exc),
+                "wiki_id": exc.wiki_id,
+                "wiki_path": exc.wiki_path,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"generated": generated}
@@ -519,6 +740,8 @@ def skip_routine(
     routine = session.get(Routine, routine_id)
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
+    if not payload.expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical routine skip mutation")
     existing = session.scalar(
         select(RoutineSkip).where(
             RoutineSkip.routine_id == routine_id,
@@ -533,10 +756,32 @@ def skip_routine(
             "reason": existing.reason,
         }
     skip = RoutineSkip(routine_id=routine_id, scheduled_date=payload.scheduled_date, reason=payload.reason)
-    session.add(skip)
-    session.flush()
-    _audit(session, "routine", routine.id, "skipped", actor, payload.model_dump())
-    session.commit()
+    proposed_skips = [
+        {"scheduled_date": item.scheduled_date.isoformat(), "reason": item.reason} for item in routine.skips
+    ]
+    proposed_skips.append({"scheduled_date": payload.scheduled_date.isoformat(), "reason": payload.reason})
+    try:
+        _wiki_sync(session, routine, "routine", payload.expected_hash, proposed_skips)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.add(skip)
+        session.flush()
+        _audit(
+            session,
+            "routine",
+            routine.id,
+            "skipped",
+            actor,
+            {"scheduled_date": payload.scheduled_date, "reason": payload.reason},
+        )
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, routine, "routine", exc)
     return {"id": skip.id, "routine_id": routine_id, "scheduled_date": skip.scheduled_date, "reason": skip.reason}
 
 
@@ -549,6 +794,8 @@ def update_routine(
         raise HTTPException(status_code=404, detail="Routine not found")
     changes = payload.model_dump(exclude_unset=True)
     expected_hash = changes.pop("expected_hash", None)
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical routine mutation")
     _require_goal(session, changes.get("goal_id", routine.goal_id))
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
@@ -560,11 +807,17 @@ def update_routine(
         setattr(routine, field, value.strip() if isinstance(value, str) and field in {"title", "cadence"} else value)
     try:
         _wiki_sync(session, routine, "routine", expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
     except WikiConflictError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    _audit(session, "routine", routine.id, "updated", actor, changes)
-    session.commit()
+    try:
+        _audit(session, "routine", routine.id, "updated", actor, changes)
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, routine, "routine", exc)
     session.refresh(routine)
     return _resource(routine)
 
@@ -581,6 +834,18 @@ def generate_routine(
         raise HTTPException(status_code=404, detail="Routine not found")
     try:
         generated = generate_routine_tasks(session, routine, on or date.today(), actor)
+    except WikiConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except WikiReconciliationRequiredError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": str(exc),
+                "wiki_id": exc.wiki_id,
+                "wiki_path": exc.wiki_path,
+            },
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"routine_id": routine.id, "generated": generated}

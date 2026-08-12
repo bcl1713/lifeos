@@ -12,6 +12,7 @@ def test_scheduler_once_generates_due_routine_tasks(tmp_path) -> None:
         auth_username="brian",
         auth_password="password",
         scheduler_enabled=False,
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})

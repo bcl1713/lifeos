@@ -21,7 +21,7 @@ class AreaUpdate(BaseModel):
     status: str | None = Field(default=None, max_length=50)
     aliases: list[str] | None = Field(default=None, max_length=20)
     summary: str | None = None
-    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    expected_hash: str = Field(min_length=64, max_length=64)
 
 
 def _area(record) -> dict[str, Any]:

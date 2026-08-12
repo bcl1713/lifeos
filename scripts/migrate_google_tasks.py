@@ -17,6 +17,7 @@ def main() -> None:
     parser.add_argument("--as-of", type=date.fromisoformat, default=date.today())
     parser.add_argument("--records-out", type=Path)
     parser.add_argument("--staging-database", type=Path)
+    parser.add_argument("--wiki-root", type=Path)
     args = parser.parse_args()
     records = load_export(args.export)
     selected, excluded = select_for_migration(records, args.as_of)
@@ -30,7 +31,9 @@ def main() -> None:
         "excluded_old_completed": excluded,
     }
     if args.staging_database:
-        result["staging"] = import_to_database(mapped, args.staging_database)
+        if args.wiki_root is None:
+            parser.error("--wiki-root is required with --staging-database")
+        result["staging"] = import_to_database(mapped, args.staging_database, args.wiki_root)
     print(json.dumps(result, sort_keys=True))
 
 

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · LifeOS{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<p class="muted">Canonical {{ title|lower }} from the wiki. LifeOS is the working view; each record remains durable Markdown.</p>
+<form method="get" class="card">
+  <label>Search <input type="search" name="q" value="{{ query or '' }}" placeholder="Title, alias, or path"></label>
+  <label>Status
+    <select name="status">
+      <option value="">All</option>
+      {% for value in ["active", "paused", "completed", "archived"] %}
+      <option value="{{ value }}"{% if status_filter == value %} selected{% endif %}>{{ value|title }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Filter</button>
+</form>
+<section class="card">
+  {% if items %}
+    {% for item in items %}
+    <article class="task">
+      <div class="task-title">
+        <strong>{{ item.title }}</strong>
+        <span class="muted">{{ item.status }}{% if item.wiki_path %} · {{ item.wiki_path }}{% endif %}</span>
+        {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+        {% if item.link_status == "valid" %}
+        <a href="{{ item.canonical_url }}">Open canonical note</a>
+        {% else %}
+        <p class="overdue">{{ item.diagnostic or "Canonical source is unavailable" }}</p>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  {% else %}<p class="empty">No canonical {{ title|lower }} found.</p>{% endif %}
+</section>
+{% endblock %}

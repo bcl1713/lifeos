@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ record.title }} · LifeOS{% endblock %}
+{% block content %}
+<h1>{{ record.title }}</h1>
+<p class="muted">Canonical {{ record.record_type }} · {{ record.record_id }} · {{ record.path }}</p>
+<section class="card">
+  {% if record.fields.get("summary") %}<p>{{ record.fields.get("summary") }}</p>{% endif %}
+  {% if link_status == "valid" %}
+  <a href="{{ canonical_url }}">Open canonical note</a>
+  {% else %}
+  <p class="overdue">{{ diagnostic or "Canonical source is unavailable" }}</p>
+  {% endif %}
+</section>
+<section class="card">
+  <h2>Related canonical records</h2>
+  {% if related %}
+  <ul>
+    {% for item in related %}<li>{{ item.title }} · {{ item.record_type }} · {{ item.record_id }}</li>{% endfor %}
+  </ul>
+  {% else %}<p class="empty">No related canonical records.</p>{% endif %}
+</section>
+{% endblock %}

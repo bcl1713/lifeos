@@ -9,6 +9,7 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
@@ -113,7 +114,10 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
     assert task.json()["project_id"] == project_id
     assert task.json()["routine_id"] == routine_id
 
-    assert client.patch(f"/api/projects/{project_id}", json={"status": "completed"}).json()["status"] == "completed"
+    assert client.patch(
+        f"/api/projects/{project_id}",
+        json={"status": "completed", "expected_hash": project.json()["wiki_hash"]},
+    ).json()["status"] == "completed"
     assert client.get("/api/goals").json()[0]["title"] == "Keep the household running"
     assert client.get("/api/projects").json()[0]["goal_id"] == goal_id
     assert client.get("/api/routines").json()[0]["cadence"] == "weekly"
@@ -122,16 +126,56 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
             session.query(AuditRecord).filter(AuditRecord.entity_type.in_(["goal", "project", "routine"])).count() >= 4
         )
     assert client.patch(f"/api/goals/{goal_id}", json={"status": "made-up"}).status_code == 422
-    milestone = client.post(f"/api/goals/{goal_id}/milestones", json={"title": "Ship the first release"})
+    milestone = client.post(
+        f"/api/goals/{goal_id}/milestones",
+        json={"title": "Ship the first release", "expected_hash": goal.json()["wiki_hash"]},
+    )
     assert milestone.status_code == 201
     assert client.get("/api/goals").json()[0]["progress"] == 0.0
     milestone_id = milestone.json()["id"]
     assert (
-        client.patch(f"/api/goals/{goal_id}/milestones/{milestone_id}", json={"status": "completed"}).status_code == 200
+        client.patch(
+            f"/api/goals/{goal_id}/milestones/{milestone_id}",
+            json={"status": "completed", "expected_hash": client.get("/api/goals").json()[0]["wiki_hash"]},
+        ).status_code == 200
     )
     goal_view = client.get("/api/goals").json()[0]
     assert goal_view["milestones_completed"] == 1
     assert goal_view["progress"] == 100.0
+
+
+def test_goal_milestone_mutations_require_current_goal_hash(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'milestone-conflicts.db'}",
+        auth_username="brian",
+        auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    goal = client.post("/api/goals", json={"title": "Guard milestone"}).json()
+
+    missing = client.post(f"/api/goals/{goal['id']}/milestones", json={"title": "First step"})
+    assert missing.status_code == 409
+    assert client.get("/api/goals").json()[0]["milestones_total"] == 0
+
+    created = client.post(
+        f"/api/goals/{goal['id']}/milestones",
+        json={"title": "First step", "expected_hash": goal["wiki_hash"]},
+    )
+    assert created.status_code == 201
+    current_goal = client.get("/api/goals").json()[0]
+
+    stale = client.patch(
+        f"/api/goals/{goal['id']}/milestones/{created.json()['id']}",
+        json={"status": "completed", "expected_hash": goal["wiki_hash"]},
+    )
+    assert stale.status_code == 409
+    assert client.get("/api/goals").json()[0]["milestones_completed"] == 0
+    assert client.patch(
+        f"/api/goals/{goal['id']}/milestones/{created.json()['id']}",
+        json={"status": "completed", "expected_hash": current_goal["wiki_hash"]},
+    ).status_code == 200
 
 
 def test_context_resources_require_authentication(tmp_path) -> None:

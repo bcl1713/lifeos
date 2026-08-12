@@ -2,35 +2,77 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+import os
 import re
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ruamel.yaml import YAML
+from ruamel.yaml.comments import CommentedMap
+from ruamel.yaml.error import YAMLError
+
 _TYPED_PREFIX = {"project": "prj", "area": "area", "goal": "goal", "routine": "rtn", "task": "tsk"}
+
+
+def _yaml() -> YAML:
+    yaml = YAML(typ="rt")
+    yaml.preserve_quotes = True
+    yaml.default_flow_style = False
+    yaml.width = 4096
+    return yaml
+
+
+def _normalize_yaml_scalars(value: Any) -> Any:
+    if isinstance(value, str) and any(0xD800 <= ord(character) <= 0xDFFF for character in value):
+        value = value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, dict):
+        for key in list(value):
+            value[key] = _normalize_yaml_scalars(value[key])
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            value[index] = _normalize_yaml_scalars(item)
+    return value
+
+
+def _repair_legacy_plain_scalars(frontmatter: str) -> str:
+    repaired: list[str] = []
+    for line in frontmatter.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        newline = line[len(content) :]
+        if content and not content[0].isspace() and ":" in content:
+            key, raw = content.split(":", 1)
+            value = raw.lstrip()
+            if ": " in value and not value.startswith(('"', "'", "[", "{", "|", ">")):
+                content = f"{key}: {json.dumps(value)}"
+        repaired.append(content + newline)
+    return "".join(repaired)
 
 
 class WikiConflictError(ValueError):
     """Raised when a portal write would overwrite a newer wiki version."""
 
 
+class WikiReconciliationRequiredError(RuntimeError):
+    """Raised when canonical source changed but its projection transaction failed."""
+
+    def __init__(self, message: str, *, wiki_id: str, wiki_path: str):
+        super().__init__(message)
+        self.wiki_id = wiki_id
+        self.wiki_path = wiki_path
+
+
 def slugify(value: str) -> str:
     value = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return value or "untitled"
-
-
-def _scalar(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (date, datetime)):
-        return value.isoformat()
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    if isinstance(value, (list, dict)):
-        return json.dumps(value, sort_keys=True, separators=(",", ":"))
-    return str(value)
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -39,36 +81,24 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     end = text.find("\n---", 4)
     if end < 0:
         raise ValueError("unterminated frontmatter")
-    values: dict[str, Any] = {}
-    for line in text[4:end].splitlines():
-        if not line.strip() or ":" not in line:
-            continue
-        key, raw = line.split(":", 1)
-        raw = raw.strip()
-        if raw.startswith("[") or raw.startswith("{"):
-            try:
-                values[key.strip()] = json.loads(raw)
-                continue
-            except json.JSONDecodeError:
-                if raw.startswith("[") and raw.endswith("]"):
-                    values[key.strip()] = [part.strip().strip("\"'") for part in raw[1:-1].split(",") if part.strip()]
-                    continue
-        values[key.strip()] = raw.strip('"\'')
+    frontmatter = text[4 : end + 1]
+    try:
+        loaded = _yaml().load(frontmatter)
+    except YAMLError:
+        loaded = _yaml().load(_repair_legacy_plain_scalars(frontmatter))
+    if loaded is None:
+        values: dict[str, Any] = CommentedMap()
+    elif not isinstance(loaded, dict):
+        raise ValueError("frontmatter must be a YAML mapping")
+    else:
+        values = _normalize_yaml_scalars(loaded)
     return values, text[end + 4 :].lstrip("\n")
 
 
 def render_frontmatter(values: dict[str, Any], body: str) -> str:
-    lines = ["---"]
-    for key, value in values.items():
-        rendered = _scalar(value)
-        if isinstance(value, (list, dict)):
-            lines.append(f"{key}: {rendered}")
-        elif re.fullmatch(r"[A-Za-z0-9_./:@+ -]*", rendered):
-            lines.append(f"{key}: {rendered}")
-        else:
-            lines.append(f"{key}: {json.dumps(rendered)}")
-    lines.extend(["---", "", body.rstrip(), ""])
-    return "\n".join(lines)
+    stream = io.StringIO()
+    _yaml().dump(values, stream)
+    return f"---\n{stream.getvalue()}---\n\n{body.rstrip()}\n"
 
 
 @dataclass(frozen=True)
@@ -94,6 +124,67 @@ class WikiRepository:
         base = self.root / (parent or "01-Projects/LifeOS") / "lifeos" / f"{record_type}s"
         return base / f"{slugify(title)}-{record_id or slugify(title)}.md"
 
+    def _atomic_write(self, target: Path, text: str) -> None:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        existing_stat = target.stat() if target.exists() else None
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                handle.write(text)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if existing_stat is None:
+                temporary.replace(target)
+            else:
+                with target.open("w", encoding="utf-8") as handle:
+                    handle.write(temporary.read_text(encoding="utf-8"))
+                    handle.flush()
+                    os.fsync(handle.fileno())
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _register_in_index(self, record_type: str, record: "WikiRecord") -> None:
+        category = {"project": "01-Projects", "area": "02-Areas"}.get(record_type)
+        if category is None:
+            return
+        index = self.root / category / "index.md"
+        target = record.path.removesuffix(".md")
+        link = f"[[{target}|{record.title}]]"
+        if index.exists():
+            text = index.read_text(encoding="utf-8")
+            if link in text:
+                return
+        else:
+            text = f"# {'Projects' if record_type == 'project' else 'Areas'}\n"
+        self._atomic_write(index, text.rstrip() + f"\n\n- {link}\n")
+
+    def _indexed_paths(self, record_type: str) -> list[Path]:
+        category = {"project": "01-Projects", "area": "02-Areas"}[record_type]
+        index = self.root / category / "index.md"
+        if not index.is_file():
+            return []
+        paths: list[Path] = []
+        for raw in re.findall(r"\[\[([^\]|#]+)(?:#[^\]|]+)?(?:\|[^\]]+)?\]\]", index.read_text(encoding="utf-8")):
+            candidate = (self.root / raw.strip()).resolve()
+            try:
+                candidate.relative_to(self.root)
+            except ValueError:
+                continue
+            options = [candidate]
+            if candidate.suffix.casefold() != ".md":
+                options.extend([candidate.with_suffix(".md"), candidate / "index.md", candidate / "Index.md"])
+                parent = candidate.parent
+                if parent.is_dir():
+                    expected_names = {f"{candidate.name}.md".casefold(), candidate.name.casefold()}
+                    options.extend(
+                        path for path in parent.iterdir() if path.is_file() and path.name.casefold() in expected_names
+                    )
+            match = next((option for option in options if option.is_file()), None)
+            if match is not None and match not in paths:
+                paths.append(match)
+        return paths
+
     def write(
         self,
         record_type: str,
@@ -108,9 +199,16 @@ class WikiRepository:
             raise ValueError(f"unsupported wiki record type: {record_type}")
         record_id = str(fields.get("id") or f"{_TYPED_PREFIX[record_type]}-{slugify(title)}")
         existing = self.find_by_id(record_id) if record_id else None
-        if existing is None and path is None:
-            existing = next((item for item in self.list_records(record_type) if item.title.casefold() == title.casefold()), None)
-        target = (self.root / (path or (existing.path if existing else self._path(record_type, title, record_id=record_id)))).resolve()
+        selected_path = path or (existing.path if existing else None)
+        if selected_path is None:
+            candidate = self._path(record_type, title, record_id=record_id)
+            if candidate.exists() and record_type in {"project", "area"}:
+                candidate_record = self.read(candidate.relative_to(self.root).as_posix())
+                if candidate_record.record_id != record_id:
+                    category = "01-Projects" if record_type == "project" else "02-Areas"
+                    candidate = self.root / category / f"{slugify(title)}-{slugify(record_id)}" / "index.md"
+            selected_path = candidate.relative_to(self.root).as_posix()
+        target = (self.root / selected_path).resolve()
         target.relative_to(self.root)
         target.parent.mkdir(parents=True, exist_ok=True)
         if expected_hash is not None:
@@ -119,15 +217,22 @@ class WikiRepository:
             actual_hash = hashlib.sha256(target.read_bytes()).hexdigest()
             if actual_hash != expected_hash:
                 raise WikiConflictError("Canonical wiki record changed since it was read")
-        if target.exists() and not body:
-            _, body = parse_frontmatter(target.read_text(encoding="utf-8"))
-        values = {"schema_version": "1", "id": record_id, "type": record_type, "title": title, **fields}
+        existing_fields: dict[str, Any] = CommentedMap()
+        if target.exists():
+            existing_fields, existing_body = parse_frontmatter(target.read_text(encoding="utf-8"))
+            if not body:
+                body = existing_body
+        values = existing_fields
+        values.update({"schema_version": "1", "id": record_id, "type": record_type, "title": title})
+        values.update(fields)
         values["updated"] = datetime.now(timezone.utc).date().isoformat()
         if not body:
             body = f"# {title}\n\n## Summary\n\n"
-        target.write_text(render_frontmatter(values, body), encoding="utf-8")
+        self._atomic_write(target, render_frontmatter(values, body))
         text = target.read_text(encoding="utf-8")
-        return WikiRecord(record_type, record_id, title, target.relative_to(self.root).as_posix(), values, body, hashlib.sha256(text.encode()).hexdigest())
+        record = WikiRecord(record_type, record_id, title, target.relative_to(self.root).as_posix(), values, body, hashlib.sha256(text.encode()).hexdigest())
+        self._register_in_index(record_type, record)
+        return record
 
     def read(self, path: str) -> WikiRecord:
         target = (self.root / path).resolve()
@@ -146,13 +251,60 @@ class WikiRepository:
 
     def list_records(self, record_type: str | None = None) -> list[WikiRecord]:
         records: list[WikiRecord] = []
-        for path in self.root.rglob("*.md"):
+        category_indexes = {
+            (self.root / "01-Projects" / "index.md").resolve(),
+            (self.root / "02-Areas" / "index.md").resolve(),
+        }
+        if record_type in {"project", "area"}:
+            paths = self._indexed_paths(record_type)
+        elif record_type is None:
+            paths = self._indexed_paths("project") + self._indexed_paths("area")
+            paths += [
+                path
+                for path in self.root.rglob("*.md")
+                if "templates" not in path.relative_to(self.root).parts
+                and "04-Archives" not in path.relative_to(self.root).parts
+                and path.resolve() not in category_indexes
+            ]
+        else:
+            paths = [
+                path
+                for path in self.root.rglob("*.md")
+                if "templates" not in path.relative_to(self.root).parts
+                and "04-Archives" not in path.relative_to(self.root).parts
+                and path.resolve() not in category_indexes
+            ]
+        seen: set[str] = set()
+        seen_files: set[tuple[int, int]] = set()
+        for path in paths:
             try:
+                stat = path.stat()
+                physical_identity = (stat.st_dev, stat.st_ino)
+                if physical_identity in seen_files:
+                    continue
                 record = self.read(path.relative_to(self.root).as_posix())
             except (OSError, ValueError):
                 continue
-            if record.record_type in _TYPED_PREFIX and (record_type is None or record.record_type == record_type):
+            if not record.record_id and record.record_type in {"project", "area"}:
+                record = WikiRecord(
+                    record.record_type,
+                    f"{_TYPED_PREFIX[record.record_type]}-{slugify(record.title)}",
+                    record.title,
+                    record.path,
+                    record.fields,
+                    record.body,
+                    record.content_hash,
+                )
+            if (
+                record.record_type in _TYPED_PREFIX
+                and record.record_id
+                and "{{" not in record.record_id
+                and (record_type is None or record.record_type == record_type)
+                and record.path not in seen
+            ):
                 records.append(record)
+                seen.add(record.path)
+                seen_files.add(physical_identity)
         return sorted(records, key=lambda item: (item.record_type, item.title.lower()))
 
     def find_by_id(self, record_id: str) -> WikiRecord | None:

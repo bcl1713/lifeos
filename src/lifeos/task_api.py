@@ -1,4 +1,5 @@
 import json
+from uuid import uuid4
 from datetime import date
 from typing import Any
 
@@ -9,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskDependency, TaskList, utcnow
-from lifeos.wiki_store import WikiConflictError, WikiRepository
+from lifeos.wiki_store import WikiConflictError, WikiReconciliationRequiredError, WikiRepository, slugify
 
 router = APIRouter(prefix="/api")
 
@@ -49,6 +50,7 @@ class TaskUpdate(BaseModel):
 
 class TaskDependencyCreate(BaseModel):
     depends_on_task_id: int
+    expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
 def get_session(request: Request):
@@ -106,29 +108,108 @@ def add_audit(session: Session, *, task_id: int, action: str, actor: str, payloa
     )
 
 
-def sync_task_to_wiki(session: Session, task: Task, expected_hash: str | None = None) -> None:
+def projection_reconciliation_required(
+    session: Session,
+    item: Any,
+    entity: str,
+    exc: Exception,
+    *,
+    wiki_id: str | None = None,
+    wiki_path: str | None = None,
+) -> None:
+    if wiki_id is None or wiki_path is None:
+        state = getattr(item, "_sa_instance_state", None)
+        values = state.dict if state is not None else {}
+        wiki_id = wiki_id if wiki_id is not None else values.get("wiki_id")
+        wiki_path = wiki_path if wiki_path is not None else values.get("wiki_path")
+    session.rollback()
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "canonical_source_written_projection_failed",
+            "message": f"Canonical {entity} was written, but the projection failed; reconciliation is required",
+            "wiki_id": wiki_id,
+            "wiki_path": wiki_path,
+        },
+    ) from exc
+
+
+def raise_reconciliation_required(exc: WikiReconciliationRequiredError) -> None:
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "code": "canonical_source_written_projection_failed",
+            "message": str(exc),
+            "wiki_id": exc.wiki_id,
+            "wiki_path": exc.wiki_path,
+        },
+    ) from exc
+
+
+def sync_task_to_wiki(
+    session: Session,
+    task: Task,
+    expected_hash: str | None = None,
+    dependency_wiki_ids: list[str] | None = None,
+) -> None:
     repository: WikiRepository | None = session.info.get("wiki_repository")
     if repository is None:
-        return
-    fields = {
-        "id": task.wiki_id or f"tsk-{task.id}",
-        "status": task.status,
-        "notes": task.notes,
-        "priority": task.priority,
-        "tags": json.loads(task.tags or "[]"),
-        "source_ref": task.source_ref,
-        "due_date": task.due_date,
-        "task_list_id": task.task_list_id,
-        "goal_id": task.goal_id,
-        "project_id": task.project_id,
-        "routine_id": task.routine_id,
-        "parent_id": task.parent_id,
-    }
-    existing = repository.find_by_id(task.wiki_id) if task.wiki_id else repository.find_by_title("task", task.title)
-    if existing is not None:
-        task.wiki_id, task.wiki_path = existing.record_id, existing.path
-        fields["id"] = existing.record_id
-    record = repository.write("task", task.title, fields, path=task.wiki_path, expected_hash=expected_hash)
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    with session.no_autoflush:
+        dependency_ids = dependency_wiki_ids if dependency_wiki_ids is not None else [
+            wiki_id
+            for wiki_id in session.scalars(
+                select(Task.wiki_id)
+                .join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
+                .where(TaskDependency.task_id == task.id)
+                .order_by(TaskDependency.id)
+            )
+            if wiki_id
+        ]
+        try:
+            linked = repository.read(task.wiki_path) if task.wiki_path else None
+        except FileNotFoundError:
+            linked = None
+        if task.wiki_path and linked is None:
+            raise WikiConflictError("Canonical wiki path disappeared")
+        if linked is not None and linked.record_type != "task":
+            raise WikiConflictError("Canonical wiki path is not a task")
+        if task.wiki_id:
+            existing = repository.find_by_id(task.wiki_id)
+            if existing is None:
+                raise WikiConflictError("Canonical wiki record disappeared")
+            if linked is not None and linked.record_id != existing.record_id:
+                raise WikiConflictError("Canonical wiki identity and path disagree")
+            record_id = existing.record_id
+            task.wiki_id, task.wiki_path = existing.record_id, existing.path
+        elif linked is not None:
+            record_id = linked.record_id
+            task.wiki_id, task.wiki_path = linked.record_id, linked.path
+        else:
+            record_id = f"tsk-{slugify(task.title)}"
+            if repository.find_by_id(record_id) is not None:
+                record_id = f"{record_id}-{uuid4().hex[:8]}"
+        fields = {
+            "id": record_id,
+            "status": task.status,
+            "notes": task.notes,
+            "priority": task.priority,
+            "tags": json.loads(task.tags or "[]"),
+            "source_ref": task.source_ref,
+            "due_date": task.due_date,
+            "task_list": task.task_list.name,
+            "goal_wiki_id": task.goal.wiki_id if task.goal else None,
+            "project_wiki_id": task.project.wiki_id if task.project else None,
+            "routine_wiki_id": task.routine.wiki_id if task.routine else None,
+            "parent_wiki_id": task.parent.wiki_id if task.parent else None,
+            "occurrence_key": task.occurrence_key,
+            "depends_on": dependency_ids,
+        }
+        existing = repository.find_by_id(task.wiki_id) if task.wiki_id else None
+        if existing is not None:
+            task.wiki_id, task.wiki_path = existing.record_id, existing.path
+            fields["id"] = existing.record_id
+        record = repository.write("task", task.title, fields, path=task.wiki_path, expected_hash=expected_hash)
     task.wiki_id, task.wiki_path, task.wiki_hash = record.record_id, record.path, record.content_hash
 
 
@@ -179,29 +260,97 @@ def list_tasks(
     return [serialize_task(task) for task in session.scalars(query)]
 
 
+def create_canonical_task(
+    session: Session,
+    payload: TaskCreate,
+    actor: str,
+    *,
+    record_id: str | None = None,
+    occurrence_key: str | None = None,
+    audit_payload: dict[str, Any] | None = None,
+    audit_action: str = "created",
+    initial_status: str = "open",
+    expected_hash: str | None = None,
+    commit: bool = True,
+) -> Task:
+    task_list = session.get(TaskList, payload.task_list_id)
+    if task_list is None:
+        raise HTTPException(status_code=404, detail="Task list not found")
+    validate_task_links(session, payload.model_dump())
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    values = payload.model_dump()
+    values["status"] = initial_status
+    values["tags"] = json.dumps(values["tags"], sort_keys=True)
+    canonical_id = record_id or f"tsk-{slugify(payload.title)}"
+    if record_id is None and repository.find_by_id(canonical_id) is not None:
+        canonical_id = f"{canonical_id}-{uuid4().hex[:8]}"
+    related = {
+        "goal_wiki_id": session.get(Goal, payload.goal_id).wiki_id if payload.goal_id else None,
+        "project_wiki_id": session.get(Project, payload.project_id).wiki_id if payload.project_id else None,
+        "routine_wiki_id": session.get(Routine, payload.routine_id).wiki_id if payload.routine_id else None,
+        "parent_wiki_id": session.get(Task, payload.parent_id).wiki_id if payload.parent_id else None,
+    }
+    record = repository.write(
+        "task",
+        payload.title,
+        {
+            "id": canonical_id,
+            "status": initial_status,
+            "notes": payload.notes,
+            "priority": payload.priority,
+            "tags": payload.tags,
+            "source_ref": payload.source_ref,
+            "due_date": payload.due_date,
+            "task_list": task_list.name,
+            **related,
+            "occurrence_key": occurrence_key,
+            "depends_on": [],
+        },
+        expected_hash=expected_hash,
+    )
+    task = Task(
+        **values,
+        occurrence_key=occurrence_key,
+        wiki_id=record.record_id,
+        wiki_path=record.path,
+        wiki_hash=record.content_hash,
+    )
+    session.add(task)
+    try:
+        session.flush()
+        add_audit(
+            session,
+            task_id=task.id,
+            action=audit_action,
+            actor=actor,
+            payload=audit_payload or payload.model_dump(),
+        )
+        if commit:
+            session.commit()
+            session.refresh(task)
+    except Exception as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "canonical_source_written_projection_failed",
+                "message": "Canonical task was written, but the projection failed; reconciliation is required",
+                "wiki_id": record.record_id,
+                "wiki_path": record.path,
+            },
+        ) from exc
+    return task
+
+
 @router.post("/tasks", status_code=status.HTTP_201_CREATED)
 def create_task(
     payload: TaskCreate,
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    if session.get(TaskList, payload.task_list_id) is None:
-        raise HTTPException(status_code=404, detail="Task list not found")
-    validate_task_links(session, payload.model_dump())
-    values = payload.model_dump()
-    values["tags"] = json.dumps(values["tags"], sort_keys=True)
-    task = Task(**values)
-    session.add(task)
-    try:
-        session.flush()
-        sync_task_to_wiki(session, task)
-        add_audit(session, task_id=task.id, action="created", actor=actor, payload=payload.model_dump())
-        session.commit()
-    except IntegrityError as exc:
-        session.rollback()
-        raise HTTPException(status_code=409, detail="Task already exists in this task list") from exc
-    session.refresh(task)
-    return serialize_task(task)
+    return serialize_task(create_canonical_task(session, payload, actor))
 
 
 @router.patch("/tasks/{task_id}")
@@ -216,6 +365,8 @@ def update_task(
         raise HTTPException(status_code=404, detail="Task not found")
     changes = payload.model_dump(exclude_unset=True)
     expected_hash = changes.pop("expected_hash", None)
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical task mutation")
     if "tags" in changes:
         changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
@@ -224,13 +375,18 @@ def update_task(
     for field, value in changes.items():
         setattr(task, field, value)
     try:
-        session.flush()
         sync_task_to_wiki(session, task, expected_hash)
-        add_audit(session, task_id=task.id, action="updated", actor=actor, payload=changes)
-        session.commit()
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
     except WikiConflictError as exc:
         session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        add_audit(session, task_id=task.id, action="updated", actor=actor, payload=changes)
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, task, "task", exc)
     session.refresh(task)
     return serialize_task(task)
 
@@ -238,52 +394,69 @@ def update_task(
 @router.post("/tasks/{task_id}/complete")
 def complete_task(
     task_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return _set_task_status(session, task_id=task_id, status_value="completed", action="completed", actor=actor)
+    return _set_task_status(
+        session, task_id=task_id, status_value="completed", action="completed", actor=actor, expected_hash=expected_hash
+    )
 
 
 @router.post("/tasks/{task_id}/pause")
 def pause_task(
     task_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return _set_task_status(session, task_id=task_id, status_value="paused", action="paused", actor=actor)
+    return _set_task_status(session, task_id=task_id, status_value="paused", action="paused", actor=actor, expected_hash=expected_hash)
 
 
 @router.post("/tasks/{task_id}/cancel")
 def cancel_task(
     task_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return _set_task_status(session, task_id=task_id, status_value="cancelled", action="cancelled", actor=actor)
+    return _set_task_status(session, task_id=task_id, status_value="cancelled", action="cancelled", actor=actor, expected_hash=expected_hash)
 
 
 @router.post("/tasks/{task_id}/archive")
 def archive_task(
     task_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return _set_task_status(session, task_id=task_id, status_value="archived", action="archived", actor=actor)
+    return _set_task_status(session, task_id=task_id, status_value="archived", action="archived", actor=actor, expected_hash=expected_hash)
 
 
 @router.post("/tasks/{task_id}/reopen")
 def reopen_task(
     task_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return _set_task_status(session, task_id=task_id, status_value="open", action="reopened", actor=actor)
+    return _set_task_status(session, task_id=task_id, status_value="open", action="reopened", actor=actor, expected_hash=expected_hash)
 
 
-def _set_task_status(session: Session, *, task_id: int, status_value: str, action: str, actor: str) -> dict[str, Any]:
+def _set_task_status(
+    session: Session,
+    *,
+    task_id: int,
+    status_value: str,
+    action: str,
+    actor: str,
+    expected_hash: str | None,
+) -> dict[str, Any]:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical task mutation")
     if status_value == "completed":
         dependencies = session.scalars(select(TaskDependency).where(TaskDependency.task_id == task_id))
         unfinished = [
@@ -298,9 +471,19 @@ def _set_task_status(session: Session, *, task_id: int, status_value: str, actio
             )
     task.status = status_value
     task.updated_at = utcnow()
-    sync_task_to_wiki(session, task)
-    add_audit(session, task_id=task.id, action=action, actor=actor, payload={"status": status_value})
-    session.commit()
+    try:
+        sync_task_to_wiki(session, task, expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        add_audit(session, task_id=task.id, action=action, actor=actor, payload={"status": status_value})
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, task, "task", exc)
     session.refresh(task)
     return serialize_task(task)
 
@@ -353,8 +536,12 @@ def add_dependency(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    if session.get(Task, task_id) is None or session.get(Task, payload.depends_on_task_id) is None:
+    task = session.get(Task, task_id)
+    prerequisite = session.get(Task, payload.depends_on_task_id)
+    if task is None or prerequisite is None:
         raise HTTPException(status_code=404, detail="Task not found")
+    if not payload.expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical dependency mutation")
     if task_id == payload.depends_on_task_id or _would_create_cycle(session, task_id, payload.depends_on_task_id):
         raise HTTPException(status_code=409, detail="Task dependency would create a cycle")
     existing = session.scalar(
@@ -365,11 +552,39 @@ def add_dependency(
     )
     if existing is not None:
         return _dependency_resource(existing)
-    item = TaskDependency(task_id=task_id, depends_on_task_id=payload.depends_on_task_id)
-    session.add(item)
-    session.flush()
-    add_audit(session, task_id=task_id, action="dependency_added", actor=actor, payload=payload.model_dump())
-    session.commit()
+    dependency_ids = [
+        wiki_id
+        for wiki_id in session.scalars(
+            select(Task.wiki_id)
+            .join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
+            .where(TaskDependency.task_id == task_id)
+            .order_by(TaskDependency.id)
+        )
+        if wiki_id
+    ]
+    dependency_ids.append(prerequisite.wiki_id)
+    try:
+        sync_task_to_wiki(session, task, payload.expected_hash, dependency_ids)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        item = TaskDependency(task_id=task_id, depends_on_task_id=payload.depends_on_task_id)
+        session.add(item)
+        session.flush()
+        add_audit(
+            session,
+            task_id=task_id,
+            action="dependency_added",
+            actor=actor,
+            payload={"depends_on_task_id": payload.depends_on_task_id},
+        )
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, task, "task", exc)
     session.refresh(item)
     return _dependency_resource(item)
 
@@ -378,17 +593,43 @@ def add_dependency(
 def remove_dependency(
     task_id: int,
     dependency_id: int,
+    expected_hash: str | None = Query(default=None),
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> None:
     item = session.get(TaskDependency, dependency_id)
     if item is None or item.task_id != task_id:
         raise HTTPException(status_code=404, detail="Dependency not found")
-    session.delete(item)
-    add_audit(
-        session, task_id=task_id, action="dependency_removed", actor=actor, payload={"dependency_id": dependency_id}
-    )
-    session.commit()
+    if not expected_hash:
+        raise HTTPException(status_code=409, detail="expected_hash is required for canonical dependency mutation")
+    task = session.get(Task, task_id)
+    remaining_ids = [
+        wiki_id
+        for wiki_id in session.scalars(
+            select(Task.wiki_id)
+            .join(TaskDependency, TaskDependency.depends_on_task_id == Task.id)
+            .where(TaskDependency.task_id == task_id, TaskDependency.id != dependency_id)
+            .order_by(TaskDependency.id)
+        )
+        if wiki_id
+    ]
+    try:
+        sync_task_to_wiki(session, task, expected_hash, remaining_ids)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.delete(item)
+        session.flush()
+        add_audit(
+            session, task_id=task_id, action="dependency_removed", actor=actor, payload={"dependency_id": dependency_id}
+        )
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, task, "task", exc)
 
 
 @router.get("/tasks/{task_id}/audit")

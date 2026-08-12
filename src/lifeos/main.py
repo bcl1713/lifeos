@@ -10,7 +10,7 @@ from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.metric_api import router as metric_router
 from lifeos.scheduler import scheduler_lifespan
-from lifeos.source_api import router as source_router
+from lifeos.source_api import router as source_router, view_router as source_view_router
 from lifeos.task_api import router as task_router
 from lifeos.ui import router as ui_router
 from lifeos.wiki_context_api import router as wiki_context_router
@@ -73,6 +73,7 @@ def create_app(
     app.include_router(task_router)
     app.include_router(metric_router)
     app.include_router(source_router)
+    app.include_router(source_view_router)
     app.include_router(wiki_context_router)
     app.include_router(ui_router)
 

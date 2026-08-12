@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 def generate_due_once(app: FastAPI, on: date) -> int:
     with app.state.session_factory() as session:
+        session.info["wiki_repository"] = app.state.wiki_repository
         return generate_all_routines(session, on, "scheduler")
 
 

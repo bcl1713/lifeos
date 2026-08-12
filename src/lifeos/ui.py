@@ -1,4 +1,5 @@
 from datetime import date
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
@@ -8,8 +9,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
-from lifeos.task_api import sync_task_to_wiki
-from lifeos.wiki_store import WikiRepository
+from lifeos.context_api import GoalCreate, ProjectCreate, RoutineCreate, create_goal, create_project, create_routine
+from lifeos.task_api import (
+    TaskCreate,
+    create_task,
+    projection_reconciliation_required,
+    raise_reconciliation_required,
+    sync_task_to_wiki,
+)
+from lifeos.wiki_links import resolve_wiki_link
+from lifeos.wiki_store import WikiConflictError, WikiReconciliationRequiredError, WikiRepository
 
 router = APIRouter()
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
@@ -122,69 +131,103 @@ def create_ui_task(
     if session.get(TaskList, task_list_id) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     parsed_due_date = date.fromisoformat(due_date) if due_date else None
-    task = Task(title=title.strip(), notes=notes.strip() or None, due_date=parsed_due_date, task_list_id=task_list_id)
-    session.add(task)
-    session.flush()
-    sync_task_to_wiki(session, task)
-    session.add(
-        AuditRecord(entity_type="task", entity_id=task.id, action="created", actor=username, payload='{"source":"web"}')
+    create_task(
+        TaskCreate(
+            title=title.strip(),
+            notes=notes.strip() or None,
+            due_date=parsed_due_date,
+            task_list_id=task_list_id,
+        ),
+        actor=username,
+        session=session,
     )
-    session.commit()
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.post("/ui/tasks/{task_id}/complete", status_code=status.HTTP_303_SEE_OTHER)
 def complete_ui_task(
-    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+    task_id: int,
+    expected_hash: str = Form(...),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    return _set_ui_status(task_id, "completed", "completed", username, session)
+    return _set_ui_status(task_id, "completed", "completed", username, session, expected_hash)
 
 
 @router.post("/ui/tasks/{task_id}/pause", status_code=status.HTTP_303_SEE_OTHER)
 def pause_ui_task(
-    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+    task_id: int,
+    expected_hash: str = Form(...),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    return _set_ui_status(task_id, "paused", "paused", username, session)
+    return _set_ui_status(task_id, "paused", "paused", username, session, expected_hash)
 
 
 @router.post("/ui/tasks/{task_id}/cancel", status_code=status.HTTP_303_SEE_OTHER)
 def cancel_ui_task(
-    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+    task_id: int,
+    expected_hash: str = Form(...),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    return _set_ui_status(task_id, "cancelled", "cancelled", username, session)
+    return _set_ui_status(task_id, "cancelled", "cancelled", username, session, expected_hash)
 
 
 @router.post("/ui/tasks/{task_id}/archive", status_code=status.HTTP_303_SEE_OTHER)
 def archive_ui_task(
-    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+    task_id: int,
+    expected_hash: str = Form(...),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    return _set_ui_status(task_id, "archived", "archived", username, session)
+    return _set_ui_status(task_id, "archived", "archived", username, session, expected_hash)
 
 
 @router.post("/ui/tasks/{task_id}/reopen", status_code=status.HTTP_303_SEE_OTHER)
 def reopen_ui_task(
-    task_id: int, username: str = Depends(require_user), session: Session = Depends(get_session)
+    task_id: int,
+    expected_hash: str = Form(...),
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    return _set_ui_status(task_id, "open", "reopened", username, session)
+    return _set_ui_status(task_id, "open", "reopened", username, session, expected_hash)
 
 
-def _set_ui_status(task_id: int, status_value: str, action: str, username: str, session: Session) -> RedirectResponse:
+def _set_ui_status(
+    task_id: int,
+    status_value: str,
+    action: str,
+    username: str,
+    session: Session,
+    expected_hash: str,
+) -> RedirectResponse:
     task = session.get(Task, task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found")
     task.status = status_value
     task.updated_at = utcnow()
-    sync_task_to_wiki(session, task)
-    session.add(
-        AuditRecord(
-            entity_type="task",
-            entity_id=task.id,
-            action=action,
-            actor=username,
-            payload=f'{{"source":"web","status":"{status_value}"}}',
+    try:
+        sync_task_to_wiki(session, task, expected_hash)
+    except WikiReconciliationRequiredError as exc:
+        session.rollback()
+        raise_reconciliation_required(exc)
+    except WikiConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    try:
+        session.add(
+            AuditRecord(
+                entity_type="task",
+                entity_id=task.id,
+                action=action,
+                actor=username,
+                payload=f'{{"source":"web","status":"{status_value}"}}',
+            )
         )
-    )
-    session.commit()
+        session.commit()
+    except Exception as exc:
+        projection_reconciliation_required(session, task, "task", exc)
     return RedirectResponse("/" if status_value == "completed" else "/tasks", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -205,6 +248,48 @@ def render_context(
     )
 
 
+def _canonical_items(
+    request: Request,
+    record_type: str,
+    *,
+    search: str = "",
+    status_filter: str = "",
+) -> list[dict[str, object]]:
+    repository: WikiRepository | None = request.app.state.wiki_repository
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Wiki is not configured")
+    items = []
+    for record in repository.list_records(record_type):
+        aliases = record.fields.get("aliases") or []
+        if not isinstance(aliases, list):
+            aliases = [aliases]
+        haystack = " ".join((record.title, record.path, *(str(alias) for alias in aliases))).casefold()
+        record_status = str(record.fields.get("status") or "active")
+        if search and search.casefold() not in haystack:
+            continue
+        if status_filter and record_status.casefold() != status_filter.casefold():
+            continue
+        link = resolve_wiki_link(
+            record.path,
+            repository.root,
+            silverbullet_base_url=os.getenv("LIFEOS_SILVERBULLET_BASE_URL"),
+        )
+        summary = record.fields.get("summary") or next(
+            (line.strip() for line in record.body.splitlines() if line.strip() and not line.startswith("#")), ""
+        )
+        items.append(
+            {
+                "id": record.record_id,
+                "title": record.title,
+                "status": record_status,
+                "summary": summary,
+                "wiki_path": record.path,
+                **link,
+            }
+        )
+    return items
+
+
 @router.get("/goals", response_class=HTMLResponse)
 def goals_page(
     request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
@@ -218,29 +303,88 @@ def goals_page(
 def create_ui_goal(
     title: str = Form(...), username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> RedirectResponse:
-    goal = Goal(title=title.strip())
-    session.add(goal)
-    session.flush()
-    from lifeos.context_api import _wiki_sync
-
-    _wiki_sync(session, goal, "goal")
-    session.commit()
+    create_goal(GoalCreate(title=title.strip()), actor=username, session=session)
     return RedirectResponse("/goals", status_code=status.HTTP_303_SEE_OTHER)
 
 
 @router.get("/projects", response_class=HTMLResponse)
 def projects_page(
-    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+    request: Request,
+    q: str = "",
+    status_filter: str = "",
+    username: str = Depends(require_user),
+    session: Session = Depends(get_session),
 ) -> HTMLResponse:
-    return render_context(
-        request,
-        username,
-        session,
-        "Projects",
-        "project",
-        list(session.scalars(select(Project).order_by(Project.id))),
-        "/ui/projects",
+    if not status_filter:
+        status_filter = request.query_params.get("status", "")
+    return templates.TemplateResponse(
+        request=request,
+        name="canonical_context.html",
+        context={
+            "username": username,
+            "title": "Projects",
+            "items": _canonical_items(request, "project", search=q.strip(), status_filter=status_filter.strip()),
+            "query": q,
+            "status_filter": status_filter,
+        },
     )
+
+
+@router.get("/areas", response_class=HTMLResponse)
+def areas_page(
+    request: Request,
+    q: str = "",
+    status_filter: str = "",
+    username: str = Depends(require_user),
+) -> HTMLResponse:
+    if not status_filter:
+        status_filter = request.query_params.get("status", "")
+    return templates.TemplateResponse(
+        request=request,
+        name="canonical_context.html",
+        context={
+            "username": username,
+            "title": "Areas",
+            "items": _canonical_items(request, "area", search=q.strip(), status_filter=status_filter.strip()),
+            "query": q,
+            "status_filter": status_filter,
+        },
+    )
+
+
+def _canonical_detail(request: Request, username: str, record_type: str, wiki_id: str) -> HTMLResponse:
+    repository: WikiRepository | None = request.app.state.wiki_repository
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Wiki is not configured")
+    record = repository.find_by_id(wiki_id)
+    if record is None or record.record_type != record_type:
+        raise HTTPException(status_code=404, detail=f"Canonical {record_type} not found")
+    link = resolve_wiki_link(
+        record.path,
+        repository.root,
+        silverbullet_base_url=os.getenv("LIFEOS_SILVERBULLET_BASE_URL"),
+    )
+    relationship_key = f"{record_type}_wiki_id"
+    related = [
+        related_record
+        for related_record in repository.list_records()
+        if str(related_record.fields.get(relationship_key) or "") == wiki_id
+    ]
+    return templates.TemplateResponse(
+        request=request,
+        name="canonical_detail.html",
+        context={"username": username, "record": record, "related": related, **link},
+    )
+
+
+@router.get("/projects/{wiki_id}", response_class=HTMLResponse)
+def project_detail(request: Request, wiki_id: str, username: str = Depends(require_user)) -> HTMLResponse:
+    return _canonical_detail(request, username, "project", wiki_id)
+
+
+@router.get("/areas/{wiki_id}", response_class=HTMLResponse)
+def area_detail(request: Request, wiki_id: str, username: str = Depends(require_user)) -> HTMLResponse:
+    return _canonical_detail(request, username, "area", wiki_id)
 
 
 @router.post("/ui/projects", status_code=status.HTTP_303_SEE_OTHER)
@@ -251,15 +395,7 @@ def create_ui_project(
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
     parsed_goal = int(goal_id) if goal_id else None
-    if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    project = Project(title=title.strip(), goal_id=parsed_goal)
-    session.add(project)
-    session.flush()
-    from lifeos.context_api import _wiki_sync
-
-    _wiki_sync(session, project, "project")
-    session.commit()
+    create_project(ProjectCreate(title=title.strip(), goal_id=parsed_goal), actor=username, session=session)
     return RedirectResponse("/projects", status_code=status.HTTP_303_SEE_OTHER)
 
 
@@ -289,45 +425,24 @@ def create_ui_routine(
     username: str = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    if session.get(TaskList, task_list_id) is None:
-        raise HTTPException(status_code=404, detail="Task list not found")
     parsed_goal = int(goal_id) if goal_id else None
-    if parsed_goal is not None and session.get(Goal, parsed_goal) is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
-    routine = Routine(
+    create_routine(
+        RoutineCreate(
             title=title.strip(),
             cadence=cadence.strip(),
-            next_run_date=date.fromisoformat(start_date),
+            start_date=date.fromisoformat(start_date),
             task_list_id=task_list_id,
             goal_id=parsed_goal,
+        ),
+        actor=username,
+        session=session,
     )
-    session.add(routine)
-    session.flush()
-    from lifeos.context_api import _wiki_sync
-
-    _wiki_sync(session, routine, "routine")
-    session.commit()
     return RedirectResponse("/routines", status_code=status.HTTP_303_SEE_OTHER)
 
 
-@router.get("/context", response_class=HTMLResponse)
-def context_page(
-    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
-) -> HTMLResponse:
-    from lifeos.domain import WikiContextItem
-
-    items = list(
-        session.scalars(
-            select(WikiContextItem)
-            .where(WikiContextItem.stale.is_(False))
-            .order_by(WikiContextItem.source_type, WikiContextItem.title)
-        )
-    )
-    return templates.TemplateResponse(
-        request=request,
-        name="wiki_context.html",
-        context={"username": username, "items": items},
-    )
+@router.get("/context", status_code=status.HTTP_308_PERMANENT_REDIRECT)
+def context_page(_username: str = Depends(require_user)) -> RedirectResponse:
+    return RedirectResponse("/projects", status_code=status.HTTP_308_PERMANENT_REDIRECT)
 
 
 @router.get("/data", response_class=HTMLResponse)
