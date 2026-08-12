@@ -9,6 +9,7 @@ from pathlib import Path
 
 REQUIRED_FILES = (
     "README.md",
+    "MANIFEST.in",
     "Dockerfile",
     "docker-entrypoint.sh",
     "alembic.ini",
@@ -18,6 +19,7 @@ REQUIRED_FILES = (
     "scripts/backup_lifeos.py",
     "scripts/restore_lifeos.py",
     "scripts/export_lifeos.py",
+    "scripts/prepare_wiki_permissions.py",
 )
 REQUIRED_README = (
     "ghcr.io/bcl1713/lifeos",
@@ -58,9 +60,22 @@ def main() -> int:
         and "--clear-groups" in entrypoint
         and "LIFEOS_SUPPLEMENTARY_GIDS" in entrypoint
         and "invalid LIFEOS_SUPPLEMENTARY_GIDS" in entrypoint
+        and "prepare_wiki_permissions.py" in entrypoint
+        and "os.O_NOFOLLOW" in (
+            (args.repository / "scripts/prepare_wiki_permissions.py").read_text(encoding="utf-8")
+            if (args.repository / "scripts/prepare_wiki_permissions.py").is_file()
+            else ""
+        )
     )
     if not identity_contract:
         errors.append("runtime identity contract must show validated setpriv drop with clear-groups default")
+    manifest = (
+        (args.repository / "MANIFEST.in").read_text(encoding="utf-8")
+        if (args.repository / "MANIFEST.in").is_file()
+        else ""
+    )
+    if "recursive-include scripts *.py" not in manifest:
+        errors.append("source distribution must include operational Python scripts")
     result = {
         "valid": not errors,
         "repository": str(args.repository),

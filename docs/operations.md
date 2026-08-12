@@ -8,7 +8,7 @@ LifeOS is deployed through the Git-backed `bcl1713/homelab-stacks` repository. D
 - Git source: `https://github.com/bcl1713/homelab-stacks.git`
 - Compose path: `stacks/apps/lifeos/compose.yaml`
 - Pre-cutover production image: `ghcr.io/bcl1713/lifeos:v0.5.0`
-- Target wiki-first release: `v0.6.1`; `v0.6.0` is superseded before deployment because its privilege drop discarded the production wiki supplementary group. Do not record `v0.6.1` as current until live version, image, reconciliation, restart, and authenticated read-back pass.
+- Target wiki-first release: `v0.6.2`; `v0.6.0` was superseded before deployment because its privilege drop discarded the production wiki supplementary group, and `v0.6.1` was superseded before deployment because its root entrypoint followed a writable canonical-root symlink. Do not record `v0.6.2` as current until live version, image, reconciliation, restart, and authenticated read-back pass.
 - Access: private LAN/Tailscale through the external `proxy` network
 - Hostname: `https://lifeos.hblucas.org`
 - Application data: `/mnt/TANK/docker/lifeos/data` → `/data`

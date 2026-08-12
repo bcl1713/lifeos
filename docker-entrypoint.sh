@@ -25,15 +25,11 @@ if [ -n "$supplementary_gids" ]; then
 fi
 
 if [ -d /wiki ]; then
-    canonical_root=/wiki/01-Projects/LifeOS/lifeos
-    mkdir -p "$canonical_root"
     if [ -n "$supplementary_gids" ]; then
         canonical_gid=${supplementary_gids%%,*}
-        chgrp "$canonical_gid" "$canonical_root"
-        chmod 2775 "$canonical_root"
+        python /app/scripts/prepare_wiki_permissions.py --wiki-root /wiki --supplementary-gid "$canonical_gid"
     else
-        chown lifeos:lifeos "$canonical_root"
-        chmod 0755 "$canonical_root"
+        python /app/scripts/prepare_wiki_permissions.py --wiki-root /wiki
     fi
 fi
 
