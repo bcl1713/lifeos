@@ -20,6 +20,7 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - Wiki provenance validation: `python scripts/validate_wiki_provenance.py /home/brian/wiki` checks opted-in frontmatter/provenance metadata and reports bounded legacy-note warnings.
 - Phase 5 workflow validation: `python scripts/validate_phase5_workflows.py /home/brian/wiki` checks the canonical capture/retrieval contract.
 - Phase 6 memory validation: `python scripts/validate_phase6_memory.py /home/brian/wiki` checks persistent-memory routing and wiki-rule presence.
+- Phase 7 skill validation: `python scripts/validate_phase7_skills.py ~/.hermes/skills` checks the six required LifeOS skills and their contract sections.
 
 ## Local development
 
