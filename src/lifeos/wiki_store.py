@@ -135,6 +135,7 @@ class WikiRepository:
                 handle.flush()
                 os.fsync(handle.fileno())
             if existing_stat is None:
+                temporary.chmod(0o664)
                 temporary.replace(target)
             else:
                 with target.open("w", encoding="utf-8") as handle:

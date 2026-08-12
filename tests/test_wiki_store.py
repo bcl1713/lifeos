@@ -163,6 +163,15 @@ def test_atomic_update_preserves_existing_file_mode(tmp_path: Path) -> None:
     assert stat.S_IMODE(path.stat().st_mode) == 0o664
 
 
+def test_atomic_create_is_group_readable_and_writable(tmp_path: Path) -> None:
+    repository = WikiRepository(tmp_path / "wiki")
+
+    record = repository.write("task", "Shared", {"id": "tsk-shared", "status": "open"})
+
+    path = tmp_path / "wiki" / record.path
+    assert stat.S_IMODE(path.stat().st_mode) == 0o664
+
+
 def test_repository_discovers_indexed_legacy_project_with_mixed_case_filename(tmp_path: Path) -> None:
     path = tmp_path / "wiki/01-Projects/Legacy/Index.md"
     path.parent.mkdir(parents=True)

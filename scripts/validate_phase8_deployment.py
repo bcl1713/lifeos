@@ -52,8 +52,15 @@ def main() -> int:
         if (args.repository / "docker-entrypoint.sh").is_file()
         else ""
     )
-    if "USER root" not in dockerfile or "runuser -u lifeos" not in entrypoint:
-        errors.append("runtime identity contract must show root entrypoint plus unprivileged runuser")
+    identity_contract = (
+        "USER root" in dockerfile
+        and "setpriv --reuid=lifeos --regid=lifeos" in entrypoint
+        and "--clear-groups" in entrypoint
+        and "LIFEOS_SUPPLEMENTARY_GIDS" in entrypoint
+        and "invalid LIFEOS_SUPPLEMENTARY_GIDS" in entrypoint
+    )
+    if not identity_contract:
+        errors.append("runtime identity contract must show validated setpriv drop with clear-groups default")
     result = {
         "valid": not errors,
         "repository": str(args.repository),
