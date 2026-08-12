@@ -4,46 +4,35 @@ LifeOS is deployed through the Git-backed `bcl1713/homelab-stacks` repository. D
 
 ## Live deployment
 
-- Portainer stack: `app-lifeos` (endpoint 3)
+- Portainer stack: `app-lifeos` (stack `167`, endpoint `3`)
 - Git source: `https://github.com/bcl1713/homelab-stacks.git`
 - Compose path: `stacks/apps/lifeos/compose.yaml`
-- Current image: `ghcr.io/bcl1713/lifeos:v0.2.3`
-- Current application revision: `a6d0b8931aa22bbd930285e0dc747fe2a7a83fa6`
+- Current image: `ghcr.io/bcl1713/lifeos:v0.3.8`
+- Application release: `v0.3.8`; application commit `ae1df24`
 - Access: private LAN/Tailscale through the external `proxy` network
 - Hostname: `https://lifeos.hblucas.org`
 - Application data: `/mnt/TANK/docker/lifeos/data` → `/data`
 - Backups: `/mnt/TANK/backups/lifeos` → `/backups`
 - No host port is published.
 
-NPM forwards `lifeos.hblucas.org` to `lifeos:8000`. Pi-hole resolves the hostname to NPM at `10.10.50.4`; Pi-hole itself listens at `10.10.50.3`.
+Nginx Proxy Manager forwards `lifeos.hblucas.org` to `lifeos:8000`. Pi-hole resolves the hostname to NPM at `10.10.50.4`; Pi-hole itself listens at `10.10.50.3`.
 
 ## Secrets
 
-The human password and Jarvis agent token are stored in the Vaultwarden `LifeOS` item in the shared `Jarvis` collection. They are passed to Portainer as environment values and are never committed.
+The human password and Jarvis agent token are stored in the Vaultwarden `LifeOS` item in the shared `Jarvis` collection. They are passed to Portainer as environment values and are never committed or printed.
 
-Configured values include:
+## Startup, identity, and persistence
 
-- `LIFEOS_IMAGE` — immutable semantic-version tag or digest
-- `LIFEOS_USERNAME`
-- `LIFEOS_PASSWORD`
-- `LIFEOS_AGENT_TOKEN`
-- `LIFEOS_DATA_PATH`
-- `LIFEOS_BACKUP_PATH`
-- `LIFEOS_SCHEDULER_ENABLED`
-- `LIFEOS_SCHEDULER_INTERVAL_SECONDS`
-- `LIFEOS_TIMEZONE`
-
-## Startup and persistence
-
-1. The entrypoint prepares the bind-mounted `/data` directory.
-2. The container runs `alembic upgrade head` before Uvicorn.
-3. SQLite uses WAL and foreign-key enforcement.
-4. Routine generation runs in the application container with idempotent occurrence keys.
-5. The application runs as the unprivileged `lifeos` user after startup preparation.
+1. The entrypoint prepares the bind-mounted `/data` directory as root.
+2. Alembic upgrades run before Uvicorn.
+3. The application process runs as unprivileged UID/GID `100:101` (`lifeos`).
+4. SQLite uses WAL and foreign-key enforcement.
+5. Routine generation runs in the application container with idempotent occurrence keys.
+6. Restart persistence has been verified against the production bind mount.
 
 ## Backup and restore
 
-Create an online backup from the running container as root so the backup mount remains writable regardless of host UID mapping:
+Create an online backup from the running container:
 
 ```bash
 docker exec -u 0 app-lifeos-lifeos-1 \
@@ -59,11 +48,7 @@ docker exec app-lifeos-lifeos-1 \
   python /app/scripts/verify_backup.py /backups/<backup-file>.db
 ```
 
-A live backup was created and verified during deployment at `/backups/lifeos-live-v0.2.0.db`. The staging restore rehearsal also verified task and audit history.
-
-The approved retention policy remains **30 daily / 12 monthly**. Automated retention scheduling still needs to be added at the infrastructure layer.
-
-Export the complete database to portable JSON:
+Export portable JSON:
 
 ```bash
 docker exec app-lifeos-lifeos-1 \
@@ -71,52 +56,30 @@ docker exec app-lifeos-lifeos-1 \
   /data/lifeos.db /backups/lifeos-export-$(date -u +%Y%m%dT%H%M%SZ).json
 ```
 
-Review retention without deleting anything:
+Retention policy: **30 daily / 12 monthly**. The retention tool supports a dry run and explicit `--apply`; unattended scheduling remains an infrastructure-level operational choice and is not claimed here as implemented.
 
-```bash
-docker exec app-lifeos-lifeos-1 \
-  python /app/scripts/retain_lifeos_backups.py /backups
-```
+## Migration and task authority
 
-Apply retention only after reviewing the dry-run output:
-
-```bash
-docker exec app-lifeos-lifeos-1 \
-  python /app/scripts/retain_lifeos_backups.py /backups --apply
-```
-
-## Google Tasks migration rehearsal
-
-The read-only source inventory currently contains 49 records:
+The read-only Google Tasks inventory contained 2 lists and 49 records:
 
 - My Tasks: 16 — 2 open, 14 completed
 - Family Triage: 33 — 3 open, 30 completed
 
-The staging rehearsal selected all 49 records under the agreed rule: all open records plus completed records updated within the previous 12 months. It created 49 tasks and 49 migration audit records, and a second run created 0 duplicates.
+All 49 were imported with source markers. LifeOS is now the active task authority. Google Tasks is read-only historical source data; scheduled workflows contain no Google Tasks writer commands.
 
-The migration adapter is offline and deterministic. It does not write to Google Tasks. It preserves list, title, notes, due date, status, and a source marker containing the Google list/task IDs.
+Rollback is documented: restore the read-only Google Tasks export and re-enable the retired path only if cutover verification fails. No routine writes to both systems.
 
-Production cutover completed on 2026-08-11 after explicit approval. The final read-only snapshot contained 49 records; all 49 were imported into LifeOS with source markers. Google Tasks is now historical/read-only source data, and scheduled task-writing workflows target LifeOS.
+## Verification evidence
 
-## Verification targets
+- `https://lifeos.hblucas.org/healthz`: HTTP `200`, version `0.3.8`
+- Browser `/auth/me`, `/`, `/tasks`: HTTP `200`
+- Agent task read/create/complete/read-back/archive: `200/201/200/200/200`
+- Pre-recreation backup: `/backups/pre-phase8-git-repair.db`, `tasks=64`, `audit_records=149`
+- Post-change backup: `/backups/post-phase8.db`, `tasks=65`, `audit_records=152`
+- Full test suite: 33 passed
+- Phase 5–10 validators: valid
+- Wiki provenance: 620 notes scanned, 0 schema errors, bounded legacy warnings
 
-Verified:
+## Release and rollback
 
-- Container `app-lifeos-lifeos-1` is healthy.
-- `https://lifeos.hblucas.org/healthz` returns HTTP 200 and version `0.2.1`.
-- Browser login succeeds through the private hostname.
-- Agent bearer authentication succeeds.
-- Authenticated task creation, completion, and read-back succeed.
-- `/data` and `/backups` are mounted.
-- Backup creation and integrity verification succeed.
-- Google Tasks staging counts reconcile exactly.
-
-Remaining operational follow-up:
-
-- Add scheduled 30-daily/12-monthly backup retention.
-- Verify the first scheduled family-triage run writes to LifeOS rather than Google Tasks.
-- Keep Google Tasks read-only as a historical archive and retain the final export snapshot.
-
-## Portainer Git redeploy note
-
-Portainer retained Git metadata but initially redeployed a cached compose file and stale image content. The deployment was corrected by explicitly pulling the GHCR image and applying the pushed compose content. The live service is healthy, but Portainer’s one-click Git redeploy path should be separately repaired or verified before relying on it for unattended releases.
+Use an immutable semantic-version image tag or digest. Before stateful changes, verify a backup, record the current stack/image, and preserve the bind mounts. Roll back the image/stack definition first; do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
