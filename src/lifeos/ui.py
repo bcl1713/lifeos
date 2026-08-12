@@ -292,6 +292,26 @@ def create_ui_routine(
     return RedirectResponse("/routines", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.get("/context", response_class=HTMLResponse)
+def context_page(
+    request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
+) -> HTMLResponse:
+    from lifeos.domain import WikiContextItem
+
+    items = list(
+        session.scalars(
+            select(WikiContextItem)
+            .where(WikiContextItem.stale.is_(False))
+            .order_by(WikiContextItem.source_type, WikiContextItem.title)
+        )
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="wiki_context.html",
+        context={"username": username, "items": items},
+    )
+
+
 @router.get("/data", response_class=HTMLResponse)
 def data_page(
     request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)

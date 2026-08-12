@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Wiki Context · LifeOS{% endblock %}
+{% block content %}
+<h1>Wiki Context</h1>
+<p class="muted">Derived, read-only index of canonical Projects and Areas. Details remain in the wiki.</p>
+{% for source_type, label in [("project", "Projects"), ("area", "Areas")] %}
+<section class="card">
+  <h2>{{ label }}</h2>
+  {% set group = items | selectattr("source_type", "equalto", source_type) | list %}
+  {% if group %}
+    {% for item in group %}
+    <article class="task">
+      <div class="task-title">
+        <strong><a href="{{ item.wiki_url }}">{{ item.title }}</a></strong>
+        <span class="muted">{{ item.status }} · {{ item.wiki_path }}</span>
+        {% if item.summary %}<p>{{ item.summary }}</p>{% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  {% else %}<p class="empty">No indexed {{ label|lower }}.</p>{% endif %}
+</section>
+{% endfor %}
+{% endblock %}

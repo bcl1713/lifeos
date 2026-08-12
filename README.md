@@ -25,6 +25,7 @@ Initial application scaffold plus authenticated domain API and automatic routine
 - Phase 9 cutover validation: `python scripts/validate_phase9_cutover.py /home/brian/wiki ~/.hermes/cron` checks LifeOS task authority and rejects scheduled Google Tasks writers.
 - Phase 10 test validation: `python scripts/validate_phase10_tests.py .` checks the required focused test matrix, recovery artifacts, and source secret hygiene.
 - Whole-project intent validation: `python scripts/validate_project_intent.py .` checks promised deliverables and current operator documentation against the stated LifeOS intent.
+- Wiki context index: `python scripts/sync_wiki_context.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds the read-only Project/Area catalogue by canonical wiki path and content hash; `GET /api/wiki-context` and `/context` expose the derived interface.
 
 ## Local development
 

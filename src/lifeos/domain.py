@@ -123,6 +123,25 @@ class Project(Base):
     tasks: Mapped[list["Task"]] = relationship(back_populates="project")
 
 
+class WikiContextItem(Base):
+    __tablename__ = "wiki_context_items"
+    __table_args__ = (UniqueConstraint("source_id", name="uq_wiki_context_source_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    source_id: Mapped[str] = mapped_column(String(300), nullable=False)
+    title: Mapped[str] = mapped_column(String(300), nullable=False)
+    wiki_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    wiki_url: Mapped[str] = mapped_column(String(700), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="active", nullable=False)
+    aliases: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    summary: Mapped[Optional[str]] = mapped_column(Text)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    modified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    stale: Mapped[bool] = mapped_column(default=False, nullable=False)
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
+
+
 class Resource(Base):
     __tablename__ = "resources"
 
