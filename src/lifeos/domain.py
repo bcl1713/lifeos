@@ -123,6 +123,8 @@ class Routine(Base):
     cadence: Mapped[str] = mapped_column(String(50), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
     next_run_date: Mapped[date] = mapped_column(Date, nullable=False)
+    minimum_occurrences: Mapped[Optional[int]] = mapped_column(Integer)
+    frequency_window_days: Mapped[Optional[int]] = mapped_column(Integer)
     task_list_id: Mapped[int] = mapped_column(ForeignKey("task_lists.id", ondelete="CASCADE"), nullable=False)
     goal_id: Mapped[Optional[int]] = mapped_column(ForeignKey("goals.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)

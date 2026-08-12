@@ -18,6 +18,45 @@ def test_advanced_routine_cadences() -> None:
         raise AssertionError("invalid interval was accepted")
 
 
+def test_minimum_frequency_routine_configuration(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Habits"}).json()
+    routine = client.post(
+        "/api/routines",
+        json={
+            "title": "Exercise",
+            "cadence": "daily",
+            "start_date": "2026-08-12",
+            "task_list_id": task_list["id"],
+            "minimum_occurrences": 3,
+            "frequency_window_days": 7,
+        },
+    )
+    assert routine.status_code == 201
+    assert routine.json()["minimum_occurrences"] == 3
+    assert routine.json()["frequency_window_days"] == 7
+    assert (
+        client.post(
+            "/api/routines",
+            json={
+                "title": "Incomplete frequency",
+                "cadence": "daily",
+                "start_date": "2026-08-12",
+                "task_list_id": task_list["id"],
+                "minimum_occurrences": 3,
+            },
+        ).status_code
+        == 422
+    )
+    assert client.patch(f"/api/routines/{routine.json()['id']}", json={"frequency_window_days": 2}).status_code == 422
+
+
 def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",

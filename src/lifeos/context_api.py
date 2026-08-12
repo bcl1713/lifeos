@@ -3,7 +3,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -67,6 +67,16 @@ class RoutineCreate(BaseModel):
     start_date: date
     task_list_id: int
     goal_id: int | None = None
+    minimum_occurrences: int | None = Field(default=None, ge=1, le=31)
+    frequency_window_days: int | None = Field(default=None, ge=1, le=365)
+
+    @model_validator(mode="after")
+    def validate_frequency(self) -> "RoutineCreate":
+        if (self.minimum_occurrences is None) != (self.frequency_window_days is None):
+            raise ValueError("minimum_occurrences and frequency_window_days must be provided together")
+        if self.minimum_occurrences and self.minimum_occurrences > self.frequency_window_days:
+            raise ValueError("minimum_occurrences cannot exceed frequency_window_days")
+        return self
 
 
 class RoutineUpdate(BaseModel):
@@ -75,6 +85,8 @@ class RoutineUpdate(BaseModel):
     status: Literal["active", "paused", "archived"] | None = None
     task_list_id: int | None = None
     goal_id: int | None = None
+    minimum_occurrences: int | None = Field(default=None, ge=1, le=31)
+    frequency_window_days: int | None = Field(default=None, ge=1, le=365)
 
 
 class RoutineSkipCreate(BaseModel):
@@ -249,6 +261,8 @@ def create_routine(
         title=payload.title.strip(),
         cadence=payload.cadence.strip(),
         next_run_date=payload.start_date,
+        minimum_occurrences=payload.minimum_occurrences,
+        frequency_window_days=payload.frequency_window_days,
         task_list_id=payload.task_list_id,
         goal_id=payload.goal_id,
     )
@@ -315,6 +329,12 @@ def update_routine(
     _require_goal(session, changes.get("goal_id", routine.goal_id))
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
+    minimum = changes.get("minimum_occurrences", routine.minimum_occurrences)
+    window = changes.get("frequency_window_days", routine.frequency_window_days)
+    if (minimum is None) != (window is None) or (minimum is not None and minimum > window):
+        raise HTTPException(
+            status_code=422, detail="minimum_occurrences and frequency_window_days must be provided together"
+        )
     for field, value in changes.items():
         setattr(routine, field, value.strip() if isinstance(value, str) and field in {"title", "cadence"} else value)
     _audit(session, "routine", routine.id, "updated", actor, changes)
