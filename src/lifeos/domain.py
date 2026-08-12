@@ -63,6 +63,14 @@ class Goal(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
+    outcome: Mapped[Optional[str]] = mapped_column(Text)
+    baseline: Mapped[Optional[str]] = mapped_column(Text)
+    target: Mapped[Optional[str]] = mapped_column(Text)
+    rationale: Mapped[Optional[str]] = mapped_column(Text)
+    constraints: Mapped[Optional[str]] = mapped_column(Text)
+    review_cadence: Mapped[Optional[str]] = mapped_column(String(100))
+    review_date: Mapped[Optional[date]] = mapped_column(Date)
+    adjustment_trigger: Mapped[Optional[str]] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False

@@ -13,8 +13,23 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
 
-    goal = client.post("/api/goals", json={"title": "Keep the household running"})
+    goal = client.post(
+        "/api/goals",
+        json={
+            "title": "Keep the household running",
+            "outcome": "A reliable weekly household operating rhythm",
+            "baseline": "Ad hoc and inconsistent",
+            "target": "Weekly review completed by Sunday evening",
+            "rationale": "Reduce dropped follow-ups",
+            "constraints": "Limited evening time",
+            "review_cadence": "weekly",
+            "review_date": "2026-08-16",
+            "adjustment_trigger": "Two missed reviews in a row",
+        },
+    )
     assert goal.status_code == 201
+    assert goal.json()["target"] == "Weekly review completed by Sunday evening"
+    assert goal.json()["review_date"] == "2026-08-16"
     goal_id = goal.json()["id"]
 
     project = client.post(

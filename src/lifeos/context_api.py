@@ -16,11 +16,27 @@ router = APIRouter(prefix="/api")
 
 class GoalCreate(BaseModel):
     title: str = Field(min_length=1, max_length=300)
+    outcome: str | None = None
+    baseline: str | None = None
+    target: str | None = None
+    rationale: str | None = None
+    constraints: str | None = None
+    review_cadence: str | None = Field(default=None, max_length=100)
+    review_date: date | None = None
+    adjustment_trigger: str | None = None
 
 
 class GoalUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=300)
     status: Literal["not_started", "active", "blocked", "paused", "completed", "abandoned"] | None = None
+    outcome: str | None = None
+    baseline: str | None = None
+    target: str | None = None
+    rationale: str | None = None
+    constraints: str | None = None
+    review_cadence: str | None = Field(default=None, max_length=100)
+    review_date: date | None = None
+    adjustment_trigger: str | None = None
 
 
 class GoalMilestoneCreate(BaseModel):
@@ -113,10 +129,12 @@ def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_
 def create_goal(
     payload: GoalCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
-    goal = Goal(title=payload.title.strip())
+    values = payload.model_dump()
+    values["title"] = values["title"].strip()
+    goal = Goal(**values)
     session.add(goal)
     session.flush()
-    _audit(session, "goal", goal.id, "created", actor, {"title": goal.title})
+    _audit(session, "goal", goal.id, "created", actor, values)
     session.commit()
     session.refresh(goal)
     return _goal_resource(session, goal)
