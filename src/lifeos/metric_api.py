@@ -12,6 +12,10 @@ from lifeos.task_api import get_actor, get_session
 
 router = APIRouter(prefix="/api/metrics")
 MetricType = Literal["numeric", "boolean", "categorical", "duration", "count", "rating", "text"]
+Aggregation = Literal["latest", "sum", "average", "minimum", "maximum"]
+Display = Literal["number", "line", "bar", "text"]
+Privacy = Literal["private", "sensitive"]
+MissingPolicy = Literal["unknown", "zero", "not_applicable", "incomplete"]
 
 
 class MetricCreate(BaseModel):
@@ -19,11 +23,19 @@ class MetricCreate(BaseModel):
     label: str = Field(min_length=1, max_length=200)
     data_type: MetricType
     unit: str | None = Field(default=None, max_length=80)
+    aggregation: Aggregation = "latest"
+    display: Display = "number"
+    privacy: Privacy = "private"
+    missing_policy: MissingPolicy = "unknown"
 
 
 class MetricUpdate(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=200)
     unit: str | None = Field(default=None, max_length=80)
+    aggregation: Aggregation | None = None
+    display: Display | None = None
+    privacy: Privacy | None = None
+    missing_policy: MissingPolicy | None = None
     status: Literal["active", "archived"] | None = None
 
 
@@ -95,6 +107,10 @@ def create_metric(
         label=payload.label.strip(),
         data_type=payload.data_type,
         unit=payload.unit.strip() if payload.unit else None,
+        aggregation=payload.aggregation,
+        display=payload.display,
+        privacy=payload.privacy,
+        missing_policy=payload.missing_policy,
     )
     session.add(metric)
     try:

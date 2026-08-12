@@ -197,6 +197,10 @@ class MetricDefinition(Base):
     label: Mapped[str] = mapped_column(String(200), nullable=False)
     data_type: Mapped[str] = mapped_column(String(30), nullable=False)
     unit: Mapped[Optional[str]] = mapped_column(String(80))
+    aggregation: Mapped[str] = mapped_column(String(30), default="latest", nullable=False)
+    display: Mapped[str] = mapped_column(String(30), default="number", nullable=False)
+    privacy: Mapped[str] = mapped_column(String(30), default="private", nullable=False)
+    missing_policy: Mapped[str] = mapped_column(String(30), default="unknown", nullable=False)
     status: Mapped[str] = mapped_column(String(30), default="active", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(

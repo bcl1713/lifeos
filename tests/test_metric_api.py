@@ -19,9 +19,21 @@ def test_metric_definition_and_typed_entry_round_trip(tmp_path) -> None:
     client, app = _client(tmp_path)
     metric = client.post(
         "/api/metrics",
-        json={"slug": "energy", "label": "Energy", "data_type": "rating", "unit": "0-10"},
+        json={
+            "slug": "energy",
+            "label": "Energy",
+            "data_type": "rating",
+            "unit": "0-10",
+            "aggregation": "average",
+            "display": "line",
+            "privacy": "sensitive",
+            "missing_policy": "unknown",
+        },
     )
     assert metric.status_code == 201
+    assert metric.json()["aggregation"] == "average"
+    assert metric.json()["display"] == "line"
+    assert metric.json()["privacy"] == "sensitive"
     metric_id = metric.json()["id"]
     entry = client.post(
         f"/api/metrics/{metric_id}/entries",
