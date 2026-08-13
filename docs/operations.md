@@ -7,8 +7,8 @@ LifeOS is deployed through the Git-backed `bcl1713/homelab-stacks` repository. D
 - Portainer stack: `app-lifeos` (stack `170`, endpoint `3`)
 - Git source: `https://github.com/bcl1713/homelab-stacks.git`
 - Compose path: `stacks/apps/lifeos/compose.yaml`
-- Pre-cutover production image: `ghcr.io/bcl1713/lifeos:v0.5.0`
-- Target wiki-first release: `v0.6.2`; `v0.6.0` was superseded before deployment because its privilege drop discarded the production wiki supplementary group, and `v0.6.1` was superseded before deployment because its root entrypoint followed a writable canonical-root symlink. Do not record `v0.6.2` as current until live version, image, reconciliation, restart, and authenticated read-back pass.
+- Current production image: `ghcr.io/bcl1713/lifeos:v0.6.2` (`sha256:980b95928e0404c0e94e8bcc47088d391466a05c57614ef2adcb5f2970f2314d`)
+- Pre-cutover rollback image: `ghcr.io/bcl1713/lifeos:v0.5.0`. Releases `v0.6.0` and `v0.6.1` were superseded before deployment by supplementary-group and symlink-safety findings; neither was accepted in production.
 - Access: private LAN/Tailscale through the external `proxy` network
 - Hostname: `https://lifeos.hblucas.org`
 - Application data: `/mnt/TANK/docker/lifeos/data` → `/data`
@@ -120,7 +120,11 @@ The migration assigns deterministic non-title IDs, records projection-row proven
 
 **Local 2026-08-12 rehearsal:** `/home/brian/wiki` produced 22 canonical records (12 Projects and 10 Areas); a fresh Alembic-head database rebuilt 22 projection records with zero unexplained discrepancies and SQLite integrity `ok`. This is local evidence only. Production source counts and reconciliation must be measured separately during rollout.
 
-**Production-copy 2026-08-12 rehearsal:** a hash-verified online copy of the live `v0.5.0` SQLite database and a hash-verified wiki archive were used without modifying production. Dry-run identified 77 application-only rows (2 Goals, 3 Projects, 4 Routines, and 68 Tasks). Apply created 77 canonical records, an idempotent rerun created zero, and an empty Alembic-head database rebuilt 99/99 records with zero reconciliation discrepancies and zero semantic differences across the migrated records. This proves the migration path only; fresh live backups, production apply, writable deployment, and authenticated acceptance remain separate gates.
+**Production-copy 2026-08-12 rehearsal:** a hash-verified online copy of the live `v0.5.0` SQLite database and a hash-verified wiki archive were used without modifying production. Dry-run identified 77 application-only rows (2 Goals, 3 Projects, 4 Routines, and 68 Tasks). Apply created 77 canonical records, an idempotent rerun created zero, and an empty Alembic-head database rebuilt 99/99 records with zero reconciliation discrepancies and zero semantic differences across the migrated records. These counts describe the rehearsal copy only.
+
+**Production acceptance 2026-08-12:** fresh pre-cutover backups were verified before stopping `v0.5.0`. Live dry-run identified 78 rows (2 Goals, 3 Projects, 4 Routines, and 69 Tasks); apply created 78 canonical records and the rerun planned zero changes. A fresh Alembic-head database rebuilt 100/100 source/projection records before acceptance writes. Source-first authenticated writes passed for all five canonical domains. A separate wiki UID/GID `3000` edit synchronized back through the authenticated API. Final reconciliation remained aligned at 105/105 after restart. The live image is `v0.6.2` at `sha256:980b95928e0404c0e94e8bcc47088d391466a05c57614ef2adcb5f2970f2314d`.
+
+Post-deploy recovery evidence: `/backups/post-deploy-v0.6.2-20260813T001536Z.db` verified with 70 Tasks and 9 audit records; restore to a fresh temporary database produced identical counts and checksum. `/backups/post-deploy-v0.6.2-wiki-20260813T001536Z.tar.gz` passed archive verification. Retained artifacts are mode `0600`.
 
 ## Historical production verification snapshot
 
