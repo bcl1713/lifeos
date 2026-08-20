@@ -22,22 +22,19 @@ LifeOS is a private application container deployed by Portainer on the existing 
 
 The durable model is therefore **Markdown-backed and database-assisted**. LifeOS and the wiki are two interfaces to the same content, not separate stores of Projects, Areas, Goals, or Routines. See `docs/plans/2026-08-12-wiki-backed-portal.md` for the staged migration plan.
 
-## Rendered canonical source navigation
+## Canonical source navigation
 
 Projects and Areas expose their canonical root-relative Markdown path and an
 **Open canonical note** action. Without an external canonical-link base, the
-action uses LifeOS's authenticated `/sources/wiki/...` route, which renders a
-small escaped Markdown subset from the current canonical file. Supported
-wikilinks and relative Markdown `.md` links in that route remain internal to
-the authenticated LifeOS source view; invalid or unsafe targets are displayed
-with diagnostics instead of links.
+action uses LifeOS's authenticated `/sources/wiki/...` route to show the current
+canonical source as escaped raw Markdown. This is a read-only inspection
+surface; it does not make LifeOS a separate wiki editor or source of truth.
 
-`LIFEOS_SILVERBULLET_BASE_URL` is optional. When configured, it changes the
-Project/Area canonical-note action to a URL-encoded SilverBullet path; it does
-not change rendered in-wiki navigation or make SilverBullet a LifeOS dependency.
-The setting must point to the same canonical wiki content. See
-`docs/rendered-source-navigation.md` for user behavior, safety boundaries, and
-operator checks.
+`LIFEOS_SILVERBULLET_BASE_URL` is optional. When configured, it changes only
+the Project/Area canonical-note action to a URL-encoded SilverBullet path. The
+setting must point to the same canonical wiki content and does not make
+SilverBullet a LifeOS dependency. See `docs/rendered-source-navigation.md` for
+user behavior and operator checks.
 
 ## Mutation and recovery contract
 
