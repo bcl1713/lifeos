@@ -1,16 +1,71 @@
-name: Release container
+name: Publish release container
 
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_candidate_version:
+        description: SemVer release candidate to publish (for example v0.7.0-rc.1)
+        required: true
+        type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release channel and version
+        id: release
+        env:
+          RELEASE_CANDIDATE_VERSION: ${{ inputs.release_candidate_version }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.ref }}" != "refs/heads/dev" ]; then
+              echo "release candidates can only be dispatched from dev" >&2
+              exit 1
+            fi
+            python scripts/validate_release_policy.py \
+              --mode rc --version "$RELEASE_CANDIDATE_VERSION" --package-file pyproject.toml
+            echo "channel=rc" >> "$GITHUB_OUTPUT"
+            echo "version=$RELEASE_CANDIDATE_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            python scripts/validate_release_policy.py \
+              --mode stable --version "$GITHUB_REF_NAME" --package-file pyproject.toml
+            git fetch origin main --no-tags
+            release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+            main_commit="$(git rev-parse "origin/main^{commit}")"
+            if [ "$release_commit" != "$main_commit" ]; then
+              echo "stable release tags must point to the current main commit" >&2
+              exit 1
+            fi
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --extra test --frozen
+      - name: Run tests
+        run: uv run pytest
+      - name: Build package
+        run: uv build
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +83,8 @@ jobs:
         with:
           images: ghcr.io/bcl1713/lifeos
           tags: |
-            type=ref,event=tag
-            type=sha
+            type=raw,value=${{ needs.verify.outputs.version }}
+            type=raw,value=sha-${{ github.sha }}
       - name: Build and publish
         uses: docker/build-push-action@v6
         with:
@@ -39,3 +94,15 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.verify.outputs.channel }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = "rc" ]; then
+            gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes --prerelease
+          else
+            gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+          fi
