@@ -45,7 +45,13 @@ The development health endpoint is available at `http://127.0.0.1:8000/healthz`.
 
 ## Release model
 
-Releases use semantic-version tags in the form `vMAJOR.MINOR.PATCH`. A tag such as `v0.1.0` runs the release workflow, builds the production image, and publishes it to GHCR as both the version tag and immutable commit SHA tag. Production deployment must use an explicit version tag or digest, never `latest`.
+The package version is the `[project].version` value in `pyproject.toml`. Every release tag's SemVer core must match that value: `vMAJOR.MINOR.PATCH-rc.N` for a release candidate (RC) and `vMAJOR.MINOR.PATCH` for a stable release.
+
+- An RC is a manual workflow dispatch from `dev` with an explicit RC tag. The workflow validates the input, runs tests and builds the package before publishing, creates a GitHub prerelease with generated notes, and publishes only `ghcr.io/bcl1713/lifeos:<rc-version>` and `ghcr.io/bcl1713/lifeos:sha-<commit>`.
+- A stable release is triggered only by a final SemVer tag pointing at the current `main` commit. It validates the tag, runs tests and builds the package before publishing, creates a GitHub Release with generated notes, and publishes the version and immutable `sha-<commit>` image tags.
+- Invalid versions, mismatched package versions, non-`dev` RC dispatches, and stable tags not pointing to current `main` fail before publication. The workflow never publishes `latest` and never deploys automatically.
+
+Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After a publication, verify the GitHub Release and both the version and SHA image artifacts in GHCR. Production deployment belongs to `bcl1713/homelab-stacks` and must pin an explicit version tag or digest; it is a separate, explicit operation.
 
 ## Boundaries
 

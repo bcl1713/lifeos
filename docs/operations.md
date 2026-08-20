@@ -159,4 +159,23 @@ The following evidence describes release `v0.3.8`; it is retained for older roll
 
 ## Release and rollback
 
-Use an immutable semantic-version image tag or digest. Before stateful changes, verify a backup, record the current stack/image, and preserve the bind mounts. Roll back the image/stack definition first; do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
+The package version source is `[project].version` in `pyproject.toml`. The SemVer core of every release tag must match it; the release workflow rejects invalid or mismatched inputs before it can publish.
+
+### Release channels
+
+- **Release candidate:** manually dispatch the release workflow from `dev` with an explicit `vMAJOR.MINOR.PATCH-rc.N` input. The workflow validates the input, runs the test suite and package build before publication, creates a GitHub prerelease with generated notes, and publishes only `ghcr.io/bcl1713/lifeos:<rc-version>` and `ghcr.io/bcl1713/lifeos:sha-<commit>`.
+- **Stable:** create a final `vMAJOR.MINOR.PATCH` tag only on the current `main` commit. The workflow validates both the tag and its `main` ancestry, runs the test suite and package build before publication, creates a GitHub Release with generated notes, and publishes the version and `sha-<commit>` tags.
+
+Neither channel publishes `latest` or deploys automatically. A production rollout is a separately authorized update in `bcl1713/homelab-stacks`, pinned to an explicit image version or digest.
+
+### Verification and rollback
+
+Before release work, run the policy check from an application checkout:
+
+```bash
+python scripts/validate_release_policy.py --repository .
+```
+
+After a successful publication, verify the corresponding GitHub Release (including its prerelease status for an RC) and both GHCR artifacts: the requested version tag and `sha-<commit>`. Do not treat a workflow dispatch, tag push, or image build alone as release evidence.
+
+Before a production rollout, verify a backup, record the current stack/image, and preserve the bind mounts. To roll back, pin the prior known-good immutable LifeOS image tag or digest in the separate `bcl1713/homelab-stacks` deployment repository, then follow its deployment procedure. Do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
