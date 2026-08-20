@@ -15,11 +15,25 @@ def resolve_wiki_link(
     silverbullet_base_url: str | None = None,
 ) -> dict[str, str | bool | None]:
     root = Path(wiki_root).resolve()
-    candidate = (root / path).resolve()
+    unresolved = root / path
+    candidate = unresolved.resolve()
     try:
         relative = candidate.relative_to(root).as_posix()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Source path escapes wiki root") from exc
+    cursor = root
+    for component in Path(path).parts:
+        if component in {"", "."}:
+            continue
+        cursor /= component
+        if cursor.is_symlink():
+            return {
+                "path": path,
+                "available": False,
+                "link_status": "unavailable",
+                "canonical_url": None,
+                "diagnostic": "Canonical wiki source is symlink-unsafe",
+            }
     if not candidate.is_file():
         return {
             "path": path,
