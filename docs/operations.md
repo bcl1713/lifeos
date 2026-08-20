@@ -31,6 +31,24 @@ The human password and Jarvis agent token are stored in the Vaultwarden `LifeOS`
 6. Routine generation runs in the application container with idempotent canonical occurrence keys.
 7. Startup/release acceptance requires projection reconciliation, not merely a healthy SQLite file or HTTP health response.
 
+## Canonical source navigation
+
+Projects and Areas display their canonical wiki path and an **Open canonical
+note** action. With no additional configuration, the action opens LifeOS's
+authenticated `/sources/wiki/...` rendered-source route. The route reads the
+current canonical Markdown and keeps validated wikilinks and relative `.md`
+links inside LifeOS; invalid or unsafe targets are rendered with diagnostics,
+not anchors.
+
+To make the canonical-note action open SilverBullet instead, set
+`LIFEOS_SILVERBULLET_BASE_URL` to the reachable base URL for the same mounted
+canonical wiki. LifeOS appends the URL-encoded root-relative canonical path
+without `.md`. This is optional: LifeOS does not operate, authenticate, or
+health-check SilverBullet, and rendered in-wiki navigation remains internal
+even when the variable is set. Verify a Project and Area path (including a path
+with spaces) after changing the setting. Full behavior and safety guidance:
+`docs/rendered-source-navigation.md`.
+
 ## Backup and restore
 
 Create an online backup from the running container:
