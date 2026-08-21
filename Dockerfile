@@ -1,5 +1,11 @@
 FROM python:3.12-slim AS runtime
 
+ARG LIFEOS_BUILD_VERSION=local-dev
+ARG LIFEOS_BUILD_REVISION=unknown
+
+LABEL org.opencontainers.image.version=$LIFEOS_BUILD_VERSION \
+    org.opencontainers.image.revision=$LIFEOS_BUILD_REVISION
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app/src
@@ -14,7 +20,11 @@ COPY src ./src
 COPY scripts ./scripts
 COPY docker-entrypoint.sh /usr/local/bin/lifeos-entrypoint
 
-RUN pip install --no-cache-dir . && chmod 755 /usr/local/bin/lifeos-entrypoint && mkdir -p /data && chown -R lifeos:lifeos /app /data
+RUN python -c 'import json, os; from pathlib import Path; Path("src/lifeos/build_info.py").write_text("BUILD_VERSION = " + json.dumps(os.environ["LIFEOS_BUILD_VERSION"]) + "\nBUILD_REVISION = " + json.dumps(os.environ["LIFEOS_BUILD_REVISION"]) + "\n", encoding="utf-8")' \
+    && pip install --no-cache-dir . \
+    && chmod 755 /usr/local/bin/lifeos-entrypoint \
+    && mkdir -p /data \
+    && chown -R lifeos:lifeos /app /data
 
 USER root
 ENTRYPOINT ["/usr/local/bin/lifeos-entrypoint"]
