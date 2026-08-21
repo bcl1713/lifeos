@@ -310,8 +310,43 @@ class WikiRepository:
                 seen_files.add(physical_identity)
         return sorted(records, key=lambda item: (item.record_type, item.title.lower()))
 
+    def authoritative_records(self) -> list[WikiRecord]:
+        """Choose one canonical record per ID, preferring active sources to archives."""
+        records_by_id: dict[str, list[WikiRecord]] = {}
+        for record in self.list_records():
+            records_by_id.setdefault(record.record_id, []).append(record)
+
+        authoritative: list[WikiRecord] = []
+        conflicts: dict[str, list[str]] = {}
+        for record_id, candidates in records_by_id.items():
+            record_types = {candidate.record_type for candidate in candidates}
+            selected_precedence = max(0 if candidate.path.startswith("04-Archives/") else 1 for candidate in candidates)
+            selected = [
+                candidate
+                for candidate in candidates
+                if (0 if candidate.path.startswith("04-Archives/") else 1) == selected_precedence
+            ]
+            if len(record_types) != 1 or len(selected) != 1:
+                conflicts[record_id] = sorted(candidate.path for candidate in candidates)
+                continue
+            authoritative.append(selected[0])
+
+        if conflicts:
+            detail = "; ".join(
+                f"{record_id}: {', '.join(paths)}" for record_id, paths in sorted(conflicts.items())
+            )
+            raise ValueError(f"ambiguous canonical wiki IDs: {detail}")
+        return sorted(authoritative, key=lambda item: (item.record_type, item.title.lower()))
+
     def find_by_id(self, record_id: str) -> WikiRecord | None:
-        return next((record for record in self.list_records() if record.record_id == record_id), None)
+        return next((record for record in self.authoritative_records() if record.record_id == record_id), None)
 
     def find_by_title(self, record_type: str, title: str) -> WikiRecord | None:
-        return next((record for record in self.list_records() if record.record_type == record_type and record.title.casefold() == title.casefold()), None)
+        return next(
+            (
+                record
+                for record in self.authoritative_records()
+                if record.record_type == record_type and record.title.casefold() == title.casefold()
+            ),
+            None,
+        )

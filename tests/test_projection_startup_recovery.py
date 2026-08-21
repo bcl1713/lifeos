@@ -10,7 +10,6 @@ from lifeos.main import create_app
 from lifeos.scripts_bridge import reconcile_wiki_projection, sync_wiki_projection
 from lifeos.wiki_store import WikiRepository, render_frontmatter
 
-
 ARCHIVED_PROJECT_ID = "prj-acceptance-project-20260813t001536z"
 ACTIVE_TASK_ID = "tsk-acceptance-task-20260813t001536z"
 
@@ -99,6 +98,127 @@ def test_startup_rebuild_refuses_missing_project_with_actionable_relationship_di
                 "unresolved canonical relationships: "
                 "tsk-acceptance-task-20260813t001536z.project_wiki_id "
                 "-> prj-missing-acceptance-project \\(project\\)"
+            ),
+        ):
+            sync_wiki_projection(session, repository)
+        assert session.query(Project).count() == 0
+        assert session.query(Task).count() == 0
+
+
+def test_startup_rebuild_prefers_active_record_over_archived_duplicate_id(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    repository = _write_incident_fixture(wiki, project_id="prj-legacy-1")
+    active_project = wiki / "01-Projects" / "legacy-project" / "index.md"
+    active_project.parent.mkdir(parents=True)
+    active_project.write_text(
+        render_frontmatter(
+            {
+                "schema_version": "1",
+                "id": "prj-legacy-1",
+                "type": "project",
+                "title": "Active legacy project",
+                "status": "active",
+            },
+            "# Active legacy project\n",
+        ),
+        encoding="utf-8",
+    )
+    (wiki / "01-Projects" / "index.md").write_text(
+        "# Projects\n\n- [[01-Projects/legacy-project/index|Active legacy project]]\n",
+        encoding="utf-8",
+    )
+    database_url = f"sqlite:///{tmp_path / 'duplicate.db'}"
+    engine = create_engine(database_url)
+    initialize_database(engine)
+    factory = create_session_factory(engine)
+
+    with factory() as session:
+        result = sync_wiki_projection(session, repository)
+        project = session.scalar(select(Project).where(Project.wiki_id == "prj-legacy-1"))
+        task = session.scalar(select(Task).where(Task.wiki_id == ACTIVE_TASK_ID))
+
+        assert result == {"created": 2, "updated": 0, "stale": 0, "unchanged": 0}
+        selected = repository.find_by_id("prj-legacy-1")
+        assert selected is not None
+        assert selected.path == "01-Projects/legacy-project/index.md"
+        assert project is not None
+        assert project.title == "Active legacy project"
+        assert task is not None
+        assert task.project_id == project.id
+        report = reconcile_wiki_projection(session, repository)
+        assert report["aligned"] is True
+        assert report["shadowed_archive_ids"] == {
+            "prj-legacy-1": [
+                "01-Projects/legacy-project/index.md",
+                "04-Archives/projects/acceptance-project.md",
+            ]
+        }
+
+    app = create_app(database_url=database_url, scheduler_enabled=False, wiki_root=str(wiki))
+    with TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+
+
+def test_startup_rebuild_refuses_duplicate_ids_at_equal_active_precedence(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    for directory, title in (("legacy-one", "Legacy one"), ("legacy-two", "Legacy two")):
+        path = wiki / "01-Projects" / directory / "index.md"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            render_frontmatter(
+                {"schema_version": "1", "id": "prj-legacy-9", "type": "project", "title": title}, f"# {title}\n"
+            ),
+            encoding="utf-8",
+        )
+    (wiki / "01-Projects" / "index.md").write_text(
+        "# Projects\n\n- [[01-Projects/legacy-one/index|Legacy one]]\n- [[01-Projects/legacy-two/index|Legacy two]]\n",
+        encoding="utf-8",
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'equal-precedence.db'}")
+    initialize_database(engine)
+    factory = create_session_factory(engine)
+
+    with factory() as session:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "ambiguous canonical wiki IDs: prj-legacy-9: "
+                "01-Projects/legacy-one/index.md, 01-Projects/legacy-two/index.md"
+            ),
+        ):
+            sync_wiki_projection(session, WikiRepository(wiki))
+        assert session.query(Project).count() == 0
+
+
+def test_startup_rebuild_refuses_wrong_type_archived_relationship_target(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    repository = _write_incident_fixture(wiki, project_id="tsk-wrong-type-target")
+    target = wiki / "04-Archives" / "projects" / "acceptance-project.md"
+    target.write_text(
+        render_frontmatter(
+            {
+                "schema_version": "1",
+                "id": "tsk-wrong-type-target",
+                "type": "task",
+                "title": "Wrong type target",
+                "status": "archived",
+                "task_list": "Inbox",
+            },
+            "# Wrong type target\n",
+        ),
+        encoding="utf-8",
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'wrong-type.db'}")
+    initialize_database(engine)
+    factory = create_session_factory(engine)
+
+    with factory() as session:
+        with pytest.raises(
+            ValueError,
+            match=(
+                "unresolved canonical relationships: "
+                "tsk-acceptance-task-20260813t001536z.project_wiki_id "
+                "-> tsk-wrong-type-target \\(project\\)"
             ),
         ):
             sync_wiki_projection(session, repository)
