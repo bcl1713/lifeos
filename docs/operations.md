@@ -307,3 +307,75 @@ Also resolve `ghcr.io/bcl1713/lifeos:sha-<commit>` and confirm it reports the sa
 RC publication remains a manual dispatch from `dev` using an explicit `vMAJOR.MINOR.PATCH-rc.N` input. Stable `vMAJOR.MINOR.PATCH` releases remain `main`-only after Brian approves the `dev` → `main` release gate.
 
 Deployment changes belong only in `bcl1713/homelab-stacks`. Before stateful changes, verify a backup, record the current stack/image and digest, and preserve the bind mounts. To roll back, change the stack there to a previously tested explicit version or digest, then follow that repository's deployment procedure; roll back the image/stack definition first and do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
+
+## Health build identity and artifact verification
+
+`GET /healthz` is a public liveness endpoint. A successful response has HTTP
+`200` and these fields:
+
+| Field | Meaning | Verification use |
+| --- | --- | --- |
+| `status` | Liveness result (`ok` when the service responds normally). | Confirms the endpoint is live; it is not an artifact identifier. |
+| `service` | Service name (`lifeos`). | Identifies the responding service; it is not an artifact identifier. |
+| `package_version` | Static Python package metadata from the installed LifeOS package. The current package metadata is `0.6.2`. | Confirms the application package metadata, not the deployed image release. |
+| `build_version` | Immutable original build/release-channel version embedded when the image was built. | Compare with the inspected artifact's OCI version label. |
+| `build_revision` | Immutable source Git commit embedded when the image was built. | Compare with the inspected artifact's OCI revision label. |
+
+`build_version` is not a mutable deployment tag. For example, a later release
+alias may be attached to an existing image digest without rebuilding it; that
+artifact continues to report the original `build_version` and
+`build_revision`. Do not use `package_version`, `build_version`, or
+`build_revision` as evidence of which image reference the deployment was
+configured to use. Verify that reference separately.
+
+### Operator procedure
+
+Perform these steps against the intended deployment or a local copy of its
+artifact. The commands use placeholders and do not require Portainer access or
+application credentials.
+
+1. Record the configured image reference independently. For a Compose file,
+   render the selected configuration; for a running container, record its
+   configured image value:
+
+   ```bash
+   docker compose -f <compose-file> config | grep 'image:'
+   docker inspect <container> --format '{{.Config.Image}}'
+   ```
+
+   Prefer a digest-pinned reference. If a tag is configured, resolve and record
+   the corresponding digest before accepting the deployment; a tag alone can
+   move to a different artifact.
+
+2. Inspect the exact image artifact selected in step 1. Substitute either the
+   recorded digest or a locally available image reference for `<image-ref>`:
+
+   ```bash
+   docker image inspect <image-ref> --format '{{range .RepoDigests}}{{println .}}{{end}}'
+   docker image inspect <image-ref> --format '{{index .Config.Labels "org.opencontainers.image.version"}}'
+   docker image inspect <image-ref> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+   ```
+
+   Save the resolved `RepoDigest` together with the two OCI label values. The
+   labels `org.opencontainers.image.version` and
+   `org.opencontainers.image.revision` identify the immutable build metadata
+   embedded in that artifact.
+
+3. Retrieve health data from the intended endpoint and compare only values from
+   the same artifact:
+
+   ```bash
+   curl --fail --silent --show-error <lifeos-base-url>/healthz | python3 -m json.tool
+   ```
+
+   Confirm `status` is `ok` and `service` is `lifeos`. Confirm
+   `build_version` exactly matches
+   `org.opencontainers.image.version`, and `build_revision` exactly matches
+   `org.opencontainers.image.revision` from step 2. Record the configured
+   image tag or digest separately from those comparisons. A mismatch means the
+   endpoint and inspected artifact are not proven to be the same build and
+   requires investigation before release acceptance or rollback completion.
+
+For locally built development images, `build_version` may be `local-dev` and
+`build_revision` may be `unknown`; these defaults are not release identity and
+must not be accepted as production artifact evidence.
