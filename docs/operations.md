@@ -159,23 +159,28 @@ The following evidence describes release `v0.3.8`; it is retained for older roll
 
 ## Release and rollback
 
-The package version source is `[project].version` in `pyproject.toml`. The SemVer core of every release tag must match it; the release workflow rejects invalid or mismatched inputs before it can publish.
+### Dev test artifacts
 
-### Release channels
+A successful push or merge to `dev` runs verification, the test suite, and the package build before it publishes a test artifact. The artifact has two immutable GHCR references:
 
-- **Release candidate:** manually dispatch the release workflow from `dev` with an explicit `vMAJOR.MINOR.PATCH-rc.N` input. The workflow validates the input, runs the test suite and package build before publication, creates a GitHub prerelease with generated notes, and publishes only `ghcr.io/bcl1713/lifeos:<rc-version>` and `ghcr.io/bcl1713/lifeos:sha-<commit>`.
-- **Stable:** create a final `vMAJOR.MINOR.PATCH` tag only on the current `main` commit. The workflow validates both the tag and its `main` ancestry, runs the test suite and package build before publication, creates a GitHub Release with generated notes, and publishes the version and `sha-<commit>` tags.
+- Candidate: `ghcr.io/bcl1713/lifeos:v<next-patch>-dev.<GitHub-run-number>`
+- Commit: `ghcr.io/bcl1713/lifeos:sha-<commit>`
 
-Neither channel publishes `latest` or deploys automatically. A production rollout is a separately authorized update in `bcl1713/homelab-stacks`, pinned to an explicit image version or digest.
+`<next-patch>` is derived as one greater than `[project].version` in `pyproject.toml`. The candidate and commit tags must resolve to the same digest. Failed checks and pull-request pushes publish nothing. There is deliberately no mutable `dev` tag, and this path neither creates `latest` or a stable tag nor deploys or promotes to production.
 
-### Verification and rollback
-
-Before release work, run the policy check from an application checkout:
+Before testing a dev candidate on a server, record the candidate/version or SHA reference and resolve its digest. Test only the recorded explicit tag or a digest-pinned reference, not a branch-like tag:
 
 ```bash
-python scripts/validate_release_policy.py --repository .
+IMAGE=ghcr.io/bcl1713/lifeos:v<next-patch>-dev.<GitHub-run-number>
+docker buildx imagetools inspect "$IMAGE" --format '{{.Manifest.Digest}}'
+docker pull "$IMAGE"
+docker image inspect "$IMAGE" --format '{{index .RepoDigests 0}}'
 ```
 
-After a successful publication, verify the corresponding GitHub Release (including its prerelease status for an RC) and both GHCR artifacts: the requested version tag and `sha-<commit>`. Do not treat a workflow dispatch, tag push, or image build alone as release evidence.
+Also resolve `ghcr.io/bcl1713/lifeos:sha-<commit>` and confirm it reports the same manifest digest before any test result is used as promotion evidence. Preserve the exact tag and digest with the test record.
 
-Before a production rollout, verify a backup, record the current stack/image, and preserve the bind mounts. To roll back, pin the prior known-good immutable LifeOS image tag or digest in the separate `bcl1713/homelab-stacks` deployment repository, then follow its deployment procedure. Do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
+### Stable release, deployment, and rollback
+
+RC publication remains a manual dispatch from `dev` using an explicit `vMAJOR.MINOR.PATCH-rc.N` input. Stable `vMAJOR.MINOR.PATCH` releases remain `main`-only after Brian approves the `dev` → `main` release gate.
+
+Deployment changes belong only in `bcl1713/homelab-stacks`. Before stateful changes, verify a backup, record the current stack/image and digest, and preserve the bind mounts. To roll back, change the stack there to a previously tested explicit version or digest, then follow that repository's deployment procedure; roll back the image/stack definition first and do not delete `/mnt/TANK/docker/lifeos/data` during routine rollback.
