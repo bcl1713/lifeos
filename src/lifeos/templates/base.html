@@ -52,14 +52,14 @@
     .muted { color: #687386; font-size: .9rem; }
     .overdue { color: #a33b35; font-weight: 650; }
     .empty { color: #687386; padding: 1rem 0; }
-    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } header { flex-wrap: wrap; } nav { width: 100%; justify-content: space-between; } main { padding: 0 1rem; } .source-page { padding: 1.5rem 0 2rem; font-size: 1rem; } .source-context { margin-bottom: 1.5rem; } .markdown-body h1 { font-size: 1.75rem; } .markdown-body h2 { margin-top: 2rem; } .markdown-body h3 { margin-top: 1.5rem; } .markdown-body pre { padding: .75rem; } }
+    @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } header { flex-wrap: wrap; } header > a { max-width: 100%; } nav.primary-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: .5rem; } nav.primary-nav a, nav.primary-nav form { min-width: 0; } nav.primary-nav a { align-content: center; } nav.primary-nav form.inline { display: block; } nav.primary-nav button { width: 100%; } main { padding: 0 1rem; } .source-page { padding: 1.5rem 0 2rem; font-size: 1rem; } .source-context { margin-bottom: 1.5rem; } .markdown-body h1 { font-size: 1.75rem; } .markdown-body h2 { margin-top: 2rem; } .markdown-body h3 { margin-top: 1.5rem; } .markdown-body pre { padding: .75rem; } }
   </style>
 </head>
 <body>
 <header>
   <a href="/">LifeOS</a>
   {% if username %}
-  <nav><a href="/">Today</a><a href="/projects">Projects</a><a href="/areas">Areas</a><a href="/tasks">Tasks</a><a href="/goals">Goals</a><a href="/routines">Routines</a><a href="/data">Data</a><form class="inline" method="post" action="/ui/logout"><button class="secondary" type="submit">Log out</button></form></nav>
+  <nav class="primary-nav" aria-label="Primary navigation"><a href="/">Today</a><a href="/projects">Projects</a><a href="/areas">Areas</a><a href="/tasks">Tasks</a><a href="/goals">Goals</a><a href="/routines">Routines</a><a href="/data">Data</a><form class="inline" method="post" action="/ui/logout"><button class="secondary" type="submit">Log out</button></form></nav>
   {% endif %}
 </header>
 <main>{% block content %}{% endblock %}</main>
