@@ -118,15 +118,58 @@ python scripts/sync_wiki_projection.py \
   --wiki-root /wiki
 ```
 
-Sync refuses duplicate canonical IDs before projection mutation and never adopts an unidentified legacy row by title. Stable wiki ID and canonical path—not title resemblance—control identity.
+Sync never adopts an unidentified legacy row by title. Stable wiki ID and
+canonical path—not title resemblance—control identity.
+
+### Canonical-ID authority and duplicate recovery
+
+This contract is implemented by [issue #11](https://github.com/bcl1713/lifeos/issues/11)
+and its implementation PR [#14](https://github.com/bcl1713/lifeos/pull/14). It
+extends the archived-relationship recovery rule below; use an image that includes
+both behaviors before relying on this procedure.
+
+`/wiki` is the source of record and SQLite is a rebuildable projection. For each
+canonical ID, the authority rule is deliberately narrow:
+
+- Exactly one non-`04-Archives/` candidate of one type is authoritative over one
+  or more copies of that same ID and type in `04-Archives/`. The non-archive
+  record supplies the projected data; the archive copies are retained as source
+  history.
+- If the only candidate is under `04-Archives/`, that archive-only record is
+  authoritative. A typed archive-only record remains a valid relationship
+  target; for example, an active Task may retain `project_wiki_id` for an
+  archived Project.
+- Two or more candidates at the same precedence (for example two non-archive
+  copies, or two archive-only copies), or candidates with one ID but different
+  types, are **ambiguous**. They are strict preflight failures. Sync stops before
+  any projection mutation; it must not choose a record by title, path ordering,
+  or an existing SQLite row.
+
+Run the non-mutating gate first. Its JSON report distinguishes allowed copies
+from ambiguity:
+
+```bash
+python scripts/sync_wiki_projection.py \
+  --database sqlite:///./data/lifeos.db \
+  --wiki-root /wiki \
+  --check
+```
+
+`shadowed_archive_ids` lists the permitted active-plus-archive copies and does
+not by itself make the report unaligned. `authority_conflicts` lists ambiguous
+canonical IDs and keeps the report blocking (`aligned: false` and exit status
+`2`). Treat every item in `authority_conflicts` as a stop condition, even if the
+SQLite projection appears healthy. The check also continues to report missing or
+wrong-type relationship targets.
+
+The command neither rewrites canonical source nor modifies SQLite automatically
+when resolving authority. Do not use title matching, manual SQLite edits, or a
+projection rebuild to "fix" an ambiguous ID. Preserve backups, investigate the
+canonical Markdown records, and make any deliberate source correction through
+the approved operator process; then rerun `--check` until it is aligned before a
+writable rebuild.
 
 ### Recovering a projection-sync relationship failure
-
-`/wiki` remains the canonical source; SQLite is a rebuildable projection. A typed
-canonical record under `04-Archives` is still a valid relationship target while
-it exists. For example, an active Task may retain `project_wiki_id` for an
-archived Project, and projection sync must preserve that relationship rather
-than treating its archive location as missing.
 
 A target that is genuinely missing, or whose canonical type does not match the
 relationship, is a reconciliation failure. The `--check` report identifies the
@@ -135,9 +178,8 @@ sync formats the same diagnostic as `source-id.field -> target-id
 (expected-type)`. Sync does **not** repair, delete, rewrite, or detach canonical
 source relationships automatically.
 
-Use this recovery path only with an image that contains the relationship-recovery
-behavior. Image rollback can change application code, but it does not repair
-malformed canonical-source relationship state.
+Image rollback can change application code, but it does not repair malformed
+canonical-source relationship state or ambiguity.
 
 1. Make and verify fresh SQLite and wiki backups before any writable sync. Set
    `CONTAINER` to the running LifeOS container and keep both backup paths with
