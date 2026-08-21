@@ -45,13 +45,13 @@ The development health endpoint is available at `http://127.0.0.1:8000/healthz`.
 
 ## Release model
 
-The package version is the `[project].version` value in `pyproject.toml`. Every release tag's SemVer core must match that value: `vMAJOR.MINOR.PATCH-rc.N` for a release candidate (RC) and `vMAJOR.MINOR.PATCH` for a stable release.
+The package version is the `[project].version` value in `pyproject.toml`. Release artifacts are immutable and always use an explicit version or `sha-<commit>` tag; production deployment must use an explicit version tag or digest, never `latest`.
 
-- An RC is a manual workflow dispatch from `dev` with an explicit RC tag. The workflow validates the input, runs tests and builds the package before publishing, creates a GitHub prerelease with generated notes, and publishes only `ghcr.io/bcl1713/lifeos:<rc-version>` and `ghcr.io/bcl1713/lifeos:sha-<commit>`.
-- A stable release is triggered only by a final SemVer tag pointing at the current `main` commit. It validates the tag, runs tests and builds the package before publishing, creates a GitHub Release with generated notes, and publishes the version and immutable `sha-<commit>` image tags.
-- Invalid versions, mismatched package versions, non-`dev` RC dispatches, and stable tags not pointing to current `main` fail before publication. The workflow never publishes `latest` and never deploys automatically.
+- A successful push or merge to `dev` first runs verification, tests, and the package build. Only after those checks pass does it publish the unique candidate `v<next-patch>-dev.<GitHub-run-number>` and `sha-<commit>` tags to `ghcr.io/bcl1713/lifeos` and create a GitHub prerelease. The candidate's patch number is one greater than `[project].version`.
+- Pull-request pushes and failed checks publish no image or release. This workflow does not publish a mutable `dev` convenience tag, `latest`, a stable tag, or perform an automatic deployment or production promotion.
+- RC publication remains a manual dispatch from `dev` with an explicit `vMAJOR.MINOR.PATCH-rc.N` version. Stable `vMAJOR.MINOR.PATCH` releases remain `main`-only, after Brian approves the `dev` → `main` release gate.
 
-Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After a publication, verify the GitHub Release and both the version and SHA image artifacts in GHCR. Production deployment belongs to `bcl1713/homelab-stacks` and must pin an explicit version tag or digest; it is a separate, explicit operation.
+Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After publication, verify the GitHub Release and resolve both the candidate/version tag and its `sha-<commit>` tag to the same image digest before testing or promotion. Deployment configuration and rollout remain separate, explicit changes in `bcl1713/homelab-stacks`.
 
 ## Boundaries
 
