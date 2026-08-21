@@ -16,8 +16,10 @@ opens LifeOS's authenticated rendered-source route:
 
 The route renders the current canonical Markdown after authentication. It is a
 read-only navigation and inspection surface, not an editor or another wiki
-product area. The shared LifeOS shell remains available while reading. A source
-context band identifies the root-relative path, labels it **Canonical Markdown ·
+product area. The shared LifeOS shell remains available while reading. At narrow
+mobile widths, its primary navigation remains visible as a two-column grid of
+44px-high controls without page-level horizontal scrolling. A source context
+band identifies the root-relative path, labels it **Canonical Markdown ·
 read-only**, and provides a selectable path plus a **Copy path** control when
 JavaScript clipboard access is available. If copying is unavailable, the path
 remains selectable for manual copying. Its breadcrumb returns to the relevant
