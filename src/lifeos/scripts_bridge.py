@@ -84,13 +84,22 @@ def _unresolved_relationships(records: list[WikiRecord]) -> list[dict[str, str]]
 
 def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, object]:
     """Report projection alignment without mutating either source."""
-    records = repository.list_records()
+    discovered_records = repository.list_records()
+    try:
+        records = repository.authoritative_records()
+        authority_conflicts: list[str] = []
+    except ValueError as exc:
+        records = discovered_records
+        authority_conflicts = [str(exc)]
     unresolved_relationships = _unresolved_relationships(records)
     models = {"project": Project, "goal": Goal, "routine": Routine, "task": Task}
 
     source_by_id: dict[str, list[WikiRecord]] = {}
     for record in records:
         source_by_id.setdefault(record.record_id, []).append(record)
+    discovered_by_id: dict[str, list[WikiRecord]] = {}
+    for record in discovered_records:
+        discovered_by_id.setdefault(record.record_id, []).append(record)
 
     projection_rows: list[tuple[str, Any]] = []
     for record_type, model in models.items():
@@ -122,6 +131,14 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         record_id: sorted(record.path for record in grouped)
         for record_id, grouped in sorted(source_by_id.items())
         if len(grouped) > 1
+    }
+    shadowed_archive_ids = {
+        record_id: sorted(record.path for record in grouped)
+        for record_id, grouped in sorted(discovered_by_id.items())
+        if len(grouped) > 1
+        and len({record.record_type for record in grouped}) == 1
+        and sum(not record.path.startswith("04-Archives/") for record in grouped) == 1
+        and sum(record.path.startswith("04-Archives/") for record in grouped) >= 1
     }
     duplicate_projection_ids = {
         record_id: sorted(record_type for record_type, _item in grouped)
@@ -182,6 +199,7 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         hash_conflicts,
         invalid_links,
         unresolved_relationships,
+        authority_conflicts,
     )
     return {
         "wiki_records": len(records),
@@ -190,6 +208,8 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         "missing_projection": missing_projection,
         "orphaned_projection": orphaned_projection,
         "duplicate_source_ids": duplicate_source_ids,
+        "shadowed_archive_ids": shadowed_archive_ids,
+        "authority_conflicts": authority_conflicts,
         "duplicate_projection_ids": duplicate_projection_ids,
         "duplicate_projection_paths": duplicate_projection_paths,
         "missing_identity": sorted(missing_identity),
@@ -203,16 +223,7 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
 
 
 def sync_wiki_projection(session, repository: WikiRepository) -> dict[str, int]:
-    records = repository.list_records()
-    source_paths_by_id: dict[str, list[str]] = {}
-    for record in records:
-        source_paths_by_id.setdefault(record.record_id, []).append(record.path)
-    duplicate_ids = {
-        record_id: sorted(paths) for record_id, paths in source_paths_by_id.items() if len(paths) > 1
-    }
-    if duplicate_ids:
-        detail = "; ".join(f"{record_id}: {', '.join(paths)}" for record_id, paths in sorted(duplicate_ids.items()))
-        raise ValueError(f"duplicate canonical wiki IDs: {detail}")
+    records = repository.authoritative_records()
     unresolved_relationships = _unresolved_relationships(records)
     if unresolved_relationships:
         detail = "; ".join(
