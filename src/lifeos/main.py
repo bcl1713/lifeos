@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from lifeos import __version__
 from lifeos.area_api import router as area_router
 from lifeos.auth import AuthService
+from lifeos.build_info import BUILD_REVISION, BUILD_VERSION
 from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.metric_api import router as metric_router
@@ -32,6 +33,8 @@ def create_app(
     scheduler_enabled: bool | None = None,
     scheduler_interval_seconds: int | None = None,
     wiki_root: str | None = None,
+    build_version: str | None = None,
+    build_revision: str | None = None,
 ) -> FastAPI:
     database_url = database_url or os.getenv("DATABASE_URL", "sqlite:///./data/lifeos.db")
     engine = create_engine(database_url)
@@ -54,6 +57,8 @@ def create_app(
     scheduler_interval_seconds = scheduler_interval_seconds or int(
         os.getenv("LIFEOS_SCHEDULER_INTERVAL_SECONDS", "900")
     )
+    build_version = build_version or BUILD_VERSION
+    build_revision = build_revision or BUILD_REVISION
     app = FastAPI(
         title="LifeOS",
         version=__version__,
@@ -88,7 +93,9 @@ def create_app(
         return {
             "status": "ok",
             "service": "lifeos",
-            "version": os.getenv("LIFEOS_VERSION", __version__),
+            "package_version": __version__,
+            "build_version": build_version,
+            "build_revision": build_revision,
         }
 
     @app.post("/auth/login", status_code=status.HTTP_204_NO_CONTENT)

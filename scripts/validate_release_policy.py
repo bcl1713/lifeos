@@ -77,6 +77,8 @@ def validate_repository(repository: Path) -> list[str]:
         "uv build",
         "type=raw,value=${{ needs.verify.outputs.version }}",
         "type=raw,value=sha-${{ github.sha }}",
+        "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}",
+        "LIFEOS_BUILD_REVISION=${{ github.sha }}",
         "id: immutable_tags",
         "echo \"sha_unpublished=false\" >> \"$GITHUB_OUTPUT\"",
         "echo \"version_unpublished=false\" >> \"$GITHUB_OUTPUT\"",

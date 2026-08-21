@@ -81,3 +81,10 @@ def test_repository_release_workflows_enforce_channel_boundaries() -> None:
     errors = validate_repository(Path("."))
 
     assert errors == []
+
+
+def test_release_workflow_preserves_original_build_identity_when_promoting_a_sha_image() -> None:
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert 'docker buildx imagetools create --tag "ghcr.io/bcl1713/lifeos:$VERSION"' in workflow
+    assert "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}" in workflow
