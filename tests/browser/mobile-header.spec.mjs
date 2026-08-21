@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 const viewports = [320, 375];
 
 for (const width of viewports) {
-  test(`authenticated source header has no page overflow at ${width}px`, async ({ page }) => {
+  test(`authenticated source header has usable controls and no page overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.goto('/login');
     await page.getByLabel('Username').fill('brian');
@@ -15,13 +15,33 @@ for (const width of viewports) {
     await expect(page.locator('article.markdown-body')).toContainText('Canonical content.');
     await expect(page.locator('article.markdown-body')).toContainText('Unsafe link scheme');
     await expect(page.locator('article.markdown-body a[href^="javascript:"]')).toHaveCount(0);
-    await expect(page.locator('header nav a, header nav button')).toHaveCount(8);
-    for (const control of await page.locator('header nav a, header nav button').all()) {
+    const controls = page.locator('header nav a, header nav button');
+    await expect(controls).toHaveCount(8);
+    for (const control of await controls.all()) {
       await expect(control).toBeVisible();
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box.width).toBeGreaterThanOrEqual(24);
+      expect(box.height).toBeGreaterThanOrEqual(44);
     }
 
     const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(scrollWidth).toBeLessThanOrEqual(width);
+
+    for (const [name, path] of [
+      ['Today', '/'],
+      ['Projects', '/projects'],
+      ['Areas', '/areas'],
+      ['Tasks', '/tasks'],
+      ['Goals', '/goals'],
+      ['Routines', '/routines'],
+      ['Data', '/data'],
+    ]) {
+      await page.getByRole('link', { name }).click();
+      expect(new URL(page.url()).pathname).toBe(path);
+    }
+
+    await page.goto('/sources/wiki/02-Areas/House/Index.md');
 
     await page.getByRole('button', { name: 'Log out' }).click();
     await expect(page).toHaveURL(/\/login$/);
