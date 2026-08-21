@@ -257,14 +257,17 @@ class WikiRepository:
             (self.root / "02-Areas" / "index.md").resolve(),
         }
         if record_type in {"project", "area"}:
-            paths = self._indexed_paths(record_type)
+            paths = self._indexed_paths(record_type) + [
+                path
+                for path in (self.root / "04-Archives").rglob("*.md")
+                if "templates" not in path.relative_to(self.root).parts
+            ]
         elif record_type is None:
             paths = self._indexed_paths("project") + self._indexed_paths("area")
             paths += [
                 path
                 for path in self.root.rglob("*.md")
                 if "templates" not in path.relative_to(self.root).parts
-                and "04-Archives" not in path.relative_to(self.root).parts
                 and path.resolve() not in category_indexes
             ]
         else:
@@ -272,7 +275,6 @@ class WikiRepository:
                 path
                 for path in self.root.rglob("*.md")
                 if "templates" not in path.relative_to(self.root).parts
-                and "04-Archives" not in path.relative_to(self.root).parts
                 and path.resolve() not in category_indexes
             ]
         seen: set[str] = set()
