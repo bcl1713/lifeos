@@ -16,10 +16,8 @@ opens LifeOS's authenticated rendered-source route:
 
 The route renders the current canonical Markdown after authentication. It is a
 read-only navigation and inspection surface, not an editor or another wiki
-product area. The shared LifeOS shell remains available while reading. At narrow
-mobile widths, its primary navigation remains visible as a two-column grid of
-44px-high controls without page-level horizontal scrolling. A source context
-band identifies the root-relative path, labels it **Canonical Markdown ·
+product area. The shared LifeOS shell remains available while reading. A source
+context band identifies the root-relative path, labels it **Canonical Markdown ·
 read-only**, and provides a selectable path plus a **Copy path** control when
 JavaScript clipboard access is available. If copying is unavailable, the path
 remains selectable for manual copying. Its breadcrumb returns to the relevant
@@ -27,6 +25,36 @@ Projects or Areas entry point when that source type is known; otherwise it
 provides a safe **LifeOS** root link. The Projects and Areas workflow views
 remain the LifeOS entry points; there is no separate top-level Wiki or Context
 surface.
+
+## Mobile primary navigation
+
+This is the documentation prerequisite and delivery contract for
+[issue #22](https://github.com/bcl1713/lifeos/issues/22). It describes the
+user-visible behavior once that issue's separate frontend change is deployed;
+until then, the existing narrow-screen two-column navigation remains in place.
+
+At the narrow-screen breakpoint, the authenticated shared shell replaces the
+full primary-navigation row with a clearly labelled, icon-supported **Menu**
+disclosure control. The control has a minimum 44-by-44 CSS-pixel target, a
+visible keyboard-focus indicator, and an exposed expanded/collapsed state. It
+controls the primary-navigation region rather than duplicating destinations.
+
+When the menu is collapsed, its destination list is hidden and the page must not
+have horizontal overflow. When expanded, it exposes every primary destination
+(**Today**, **Projects**, **Areas**, **Tasks**, **Goals**, **Routines**, and
+**Data**) and **Log out**. Each destination and the logout action remains
+keyboard reachable and operable; desktop and tablet navigation retain their
+existing visible-row behavior.
+
+The disclosure works with pointer and keyboard input: focus the Menu control and
+use **Enter** or **Space** to change its state. While the menu is open,
+**Escape** closes it and returns focus to the Menu control. Motion used for the
+open/close transition respects a reduced-motion preference. The navigation is
+not dependent on JavaScript for access to destinations: without JavaScript, the
+primary-navigation destinations and logout action remain available as ordinary
+HTML controls. This behavior also applies while viewing a rendered canonical
+source; it does not change source authentication, source rendering, or
+canonical Markdown content.
 
 The renderer intentionally supports a small escaped Markdown subset: headings,
 paragraphs, ordered and unordered lists, fenced code blocks, wikilinks, and
@@ -103,8 +131,14 @@ the variable unset to restore internal canonical-note actions.
 
 Before enabling an external base URL, verify that it serves the same canonical
 wiki content and that a path containing spaces resolves with percent encoding.
-After a deployment, sign in to LifeOS, open a Project and an Area, confirm the
-displayed canonical path, and follow the canonical-note action. For internal
-navigation, also verify a valid wikilink and relative `.md` link plus a known
-invalid link diagnostic. Continue to run projection reconciliation separately;
-valid navigation is not proof that the projection is aligned with source.
+After the issue #22 frontend change is deployed, sign in to LifeOS, open a
+Project and an Area, confirm the displayed canonical path, and follow the
+canonical-note action. At 320px and
+375px viewport widths, verify the collapsed and expanded Menu states, its
+44-by-44 CSS-pixel target, visible focus, Enter/Space activation, Escape focus
+return, every destination and **Log out**, and the absence of page-level
+horizontal scrolling. Also verify the no-JavaScript fallback leaves the same
+ordinary navigation and logout controls available. For internal navigation,
+verify a valid wikilink and relative `.md` link plus a known invalid link
+diagnostic. Continue to run projection reconciliation separately; valid
+navigation is not proof that the projection is aligned with source.
