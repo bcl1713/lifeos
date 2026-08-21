@@ -7,22 +7,30 @@ from urllib.parse import quote, unquote, urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 from lifeos.task_api import get_actor
 from lifeos.wiki_links import resolve_wiki_link
 
 router = APIRouter(prefix="/api/sources")
 view_router = APIRouter()
+templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
 _UNORDERED_ITEM = re.compile(r"^[-*+]\s+(.+)$")
 _ORDERED_ITEM = re.compile(r"^\d+[.)]\s+(.+)$")
 _WIKILINK = re.compile(r"\[\[([^\]|]+)(?:\|([^\]]+))?\]\]")
 _MARKDOWN_LINK = re.compile(r"(?<!!)\[([^\]]+)\]\(([^\s)]+)(?:\s+[^)]*)?\)")
+_INLINE_CODE = re.compile(r"`([^`]+)`")
 
 
 def _source_url(path: str) -> str:
     return f"/sources/wiki/{quote(path, safe='/')}"
+
+
+def _render_text(text: str) -> str:
+    """Escape text while rendering the safe inline-code subset."""
+    return _INLINE_CODE.sub(lambda match: f"<code>{escape(match.group(1))}</code>", escape(text))
 
 
 def _link_target(
@@ -98,7 +106,7 @@ def _render_inline(text: str, *, current_path: str, wiki_root: Path) -> str:
     for match in matches:
         if match.start() < position:
             continue
-        output.append(escape(text[position : match.start()]))
+        output.append(_render_text(text[position : match.start()]))
         if match.re is _WIKILINK:
             target, label = match.group(1).strip(), (match.group(2) or match.group(1)).strip()
             href, diagnostic, external = _link_target(
@@ -111,12 +119,16 @@ def _render_inline(text: str, *, current_path: str, wiki_root: Path) -> str:
             )
         if href:
             attrs = ' rel="noopener noreferrer"' if external else ""
-            output.append(f'<a href="{escape(href, quote=True)}"{attrs}>{escape(label)}</a>')
+            external_cue = '<span class="sr-only"> (external)</span>' if external else ""
+            output.append(f'<a href="{escape(href, quote=True)}"{attrs}>{escape(label)}{external_cue}</a>')
         else:
             title = escape(diagnostic or "Unavailable link", quote=True)
-            output.append(f'<span class="wiki-link-diagnostic" title="{title}">{escape(label)}</span>')
+            output.append(
+                f'<span class="wiki-link-diagnostic" role="note">'
+                f'<span aria-hidden="true">⚠</span> {escape(label)}: {title}</span>'
+            )
         position = match.end()
-    output.append(escape(text[position:]))
+    output.append(_render_text(text[position:]))
     return "".join(output)
 
 
@@ -281,11 +293,20 @@ def view_wiki_source(
     candidate = (wiki_root / str(resolved["path"])).resolve()
     content = candidate.read_text(encoding="utf-8", errors="replace")
     rendered = render_wiki_markdown(content, current_path=str(resolved["path"]), wiki_root=wiki_root)
-    return HTMLResponse(
-        "<!doctype html><html><head><meta charset='utf-8'><title>"
-        + escape(candidate.stem)
-        + " · LifeOS</title></head><body><main><p><a href=\"/projects\">Return to Projects</a></p>"
-        + f"<p>Canonical source: <code>{escape(str(resolved['path'] or path))}</code></p>"
-        + rendered
-        + "</main></body></html>"
+    source_path = str(resolved["path"] or path)
+    section = None
+    if source_path.startswith("01-Projects/"):
+        section = {"label": "Projects", "href": "/projects"}
+    elif source_path.startswith("02-Areas/"):
+        section = {"label": "Areas", "href": "/areas"}
+    return templates.TemplateResponse(
+        request=request,
+        name="canonical_source.html",
+        context={
+            "username": _actor,
+            "title": candidate.stem,
+            "source_path": source_path,
+            "rendered": rendered,
+            "section": section,
+        },
     )
