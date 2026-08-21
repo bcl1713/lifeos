@@ -120,6 +120,87 @@ python scripts/sync_wiki_projection.py \
 
 Sync refuses duplicate canonical IDs before projection mutation and never adopts an unidentified legacy row by title. Stable wiki ID and canonical path—not title resemblance—control identity.
 
+### Recovering a projection-sync relationship failure
+
+`/wiki` remains the canonical source; SQLite is a rebuildable projection. A typed
+canonical record under `04-Archives` is still a valid relationship target while
+it exists. For example, an active Task may retain `project_wiki_id` for an
+archived Project, and projection sync must preserve that relationship rather
+than treating its archive location as missing.
+
+A target that is genuinely missing, or whose canonical type does not match the
+relationship, is a reconciliation failure. The `--check` report identifies the
+source `id`, relationship `field`, `target_id`, and `expected_type`; writable
+sync formats the same diagnostic as `source-id.field -> target-id
+(expected-type)`. Sync does **not** repair, delete, rewrite, or detach canonical
+source relationships automatically.
+
+Use this recovery path only with an image that contains the relationship-recovery
+behavior. Image rollback can change application code, but it does not repair
+malformed canonical-source relationship state.
+
+1. Make and verify fresh SQLite and wiki backups before any writable sync. Set
+   `CONTAINER` to the running LifeOS container and keep both backup paths with
+   the incident record:
+
+   ```bash
+   CONTAINER=app-lifeos-lifeos-1
+   BACKUP_TS=$(date -u +%Y%m%dT%H%M%SZ)
+   SQLITE_BACKUP=/backups/projection-sync-${BACKUP_TS}.db
+   WIKI_BACKUP=/backups/projection-sync-${BACKUP_TS}-wiki.tar.gz
+
+   docker exec -u 0 "$CONTAINER" \
+     python /app/scripts/backup_lifeos.py \
+     --database /data/lifeos.db \
+     --output "$SQLITE_BACKUP"
+   docker exec "$CONTAINER" \
+     python /app/scripts/verify_backup.py "$SQLITE_BACKUP"
+
+   docker exec -u 0 "$CONTAINER" \
+     python -c 'import sys, tarfile; source, destination = sys.argv[1:]; archive = tarfile.open(destination, "w:gz"); archive.add(source, arcname="wiki", recursive=True); archive.close()' \
+     /wiki "$WIKI_BACKUP"
+   docker exec "$CONTAINER" \
+     python -c 'import sys, tarfile; archive = tarfile.open(sys.argv[1], "r:gz"); names = archive.getnames(); archive.close(); assert any(name == "wiki" or name.startswith("wiki/") for name in names), "wiki root missing from archive"; print(f"verified={sys.argv[1]} members={len(names)}")' \
+     "$WIKI_BACKUP"
+   ```
+
+2. Run the non-mutating reconciliation gate and inspect every reported canonical
+   source record and relationship. A nonzero exit means the projection is not
+   aligned; do not proceed by changing SQLite or detaching the relationship:
+
+   ```bash
+   docker exec "$CONTAINER" \
+     python /app/scripts/sync_wiki_projection.py \
+     --database sqlite:////data/lifeos.db \
+     --wiki-root /wiki \
+     --check
+   ```
+
+3. If the target is missing or wrong-typed, restore it from the verified wiki
+   backup or otherwise deliberately correct the canonical source through the
+   approved operator process. Do not use projection sync as a source-repair
+   tool. If the target is a typed record under `04-Archives`, leave the valid
+   relationship intact and investigate only other reported discrepancies.
+
+4. After the canonical source is deliberately corrected and the backups remain
+   available, rebuild the writable SQLite projection, repeat the non-mutating
+   check, then validate the service health endpoint:
+
+   ```bash
+   docker exec "$CONTAINER" \
+     python /app/scripts/sync_wiki_projection.py \
+     --database sqlite:////data/lifeos.db \
+     --wiki-root /wiki
+
+   docker exec "$CONTAINER" \
+     python /app/scripts/sync_wiki_projection.py \
+     --database sqlite:////data/lifeos.db \
+     --wiki-root /wiki \
+     --check
+
+   curl --fail --silent --show-error https://lifeos.hblucas.org/healthz
+   ```
+
 Before the first writable wiki cutover, canonicalize any application-only domain rows using the dry-run-first migration command:
 
 ```bash
