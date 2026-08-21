@@ -29,6 +29,42 @@ def test_authenticated_internal_wiki_source_route_renders_canonical_markdown(tmp
     assert "01-Projects/Mixed Case/Index.md" in response.text
 
 
+def test_rendered_source_uses_shared_reading_shell_and_selectable_copyable_path(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    note = wiki / "02-Areas/House/Index.md"
+    note.parent.mkdir(parents=True)
+    note.write_text(
+        "# House\n\n## Notes\n\n- one\n- two\n\n`inline`\n\n```text\nlong unbroken code sample\n```\n",
+        encoding="utf-8",
+    )
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+
+    response = client.get("/sources/wiki/02-Areas/House/Index.md")
+
+    assert response.status_code == 200
+    assert '<header>' in response.text
+    assert 'href="/areas"' in response.text
+    assert '<nav aria-label="Source context">' in response.text
+    assert 'href="/areas">Areas</a>' in response.text
+    assert "Canonical Markdown" in response.text
+    assert "read-only" in response.text
+    assert '<code class="source-path" id="source-path">02-Areas/House/Index.md</code>' in response.text
+    assert '<button type="button" class="copy-path"' in response.text
+    assert 'data-copy-path aria-describedby="copy-path-status" hidden>Copy path</button>' in response.text
+    assert 'button.hidden = false;' in response.text
+    assert 'aria-live="polite"' in response.text
+    assert '<article class="markdown-body">' in response.text
+    assert 'class="source-page"' in response.text
+
+
 def test_source_api_uses_configured_app_wiki_root(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     note = wiki / "02-Areas/House/index.md"

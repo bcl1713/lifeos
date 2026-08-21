@@ -16,8 +16,17 @@ opens LifeOS's authenticated rendered-source route:
 
 The route renders the current canonical Markdown after authentication. It is a
 read-only navigation and inspection surface, not an editor or another wiki
-product area. The Projects and Areas workflow views remain the LifeOS entry
-points; there is no separate top-level Wiki or Context surface.
+product area. The shared LifeOS shell remains available while reading. At narrow
+mobile widths, its primary navigation remains visible as a two-column grid of
+44px-high controls without page-level horizontal scrolling. A source context
+band identifies the root-relative path, labels it **Canonical Markdown ·
+read-only**, and provides a selectable path plus a **Copy path** control when
+JavaScript clipboard access is available. If copying is unavailable, the path
+remains selectable for manual copying. Its breadcrumb returns to the relevant
+Projects or Areas entry point when that source type is known; otherwise it
+provides a safe **LifeOS** root link. The Projects and Areas workflow views
+remain the LifeOS entry points; there is no separate top-level Wiki or Context
+surface.
 
 The renderer intentionally supports a small escaped Markdown subset: headings,
 paragraphs, ordered and unordered lists, fenced code blocks, wikilinks, and

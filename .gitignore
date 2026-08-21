@@ -6,3 +6,5 @@ __pycache__/
 data/
 .env
 .DS_Store
+node_modules/
+test-results/
