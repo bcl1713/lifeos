@@ -403,13 +403,18 @@ def update_task(
         raise HTTPException(status_code=409, detail="expected_hash is required for canonical task mutation")
     if "tags" in changes:
         changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
-    if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
+    task_list = session.get(TaskList, changes["task_list_id"]) if "task_list_id" in changes else task.task_list
+    if task_list is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     if "owner_wiki_id" in changes or "owner_type" in changes:
         if changes.get("owner_wiki_id", task.owner_wiki_id) != task.owner_wiki_id or changes.get("owner_type", task.owner_type) != task.owner_type:
             raise HTTPException(status_code=409, detail="task owner changes require the controlled relocation workflow")
         changes.pop("owner_wiki_id", None)
         changes.pop("owner_type", None)
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    if repository is None:
+        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    resolve_task_owner(repository, task_list, task.owner_type, task.owner_wiki_id)
     validate_task_links(session, changes)
     for field, value in changes.items():
         setattr(task, field, value)

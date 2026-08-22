@@ -79,6 +79,67 @@ def test_inbox_tasks_have_an_explicit_inbox_owner_and_canonical_path(tmp_path: P
     assert (wiki / task["wiki_path"]).is_file()
 
 
+def test_task_list_updates_reject_inbox_owner_outside_inbox_and_keep_compatible_owners(tmp_path: Path) -> None:
+    client, wiki = _client(tmp_path)
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+    personal = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    errands = client.post("/api/task-lists", json={"name": "Errands"}).json()
+    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
+    area = client.post("/api/areas", json={"title": "House"}).json()
+
+    inbox_task = client.post(
+        "/api/tasks", json={"title": "Capture receipt", "task_list_id": inbox["id"], "owner_type": "inbox"}
+    ).json()
+    canonical_before = (wiki / inbox_task["wiki_path"]).read_text()
+    rejected = client.patch(
+        f"/api/tasks/{inbox_task['id']}",
+        json={"task_list_id": personal["id"], "expected_hash": inbox_task["wiki_hash"]},
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == "Inbox ownership requires the Inbox task list and no owner_wiki_id"
+    persisted = next(task for task in client.get("/api/tasks").json() if task["id"] == inbox_task["id"])
+    assert persisted["task_list_id"] == inbox["id"]
+    assert persisted["owner_type"] == "inbox"
+    assert persisted["wiki_hash"] == inbox_task["wiki_hash"]
+    assert (wiki / inbox_task["wiki_path"]).read_text() == canonical_before
+
+    project_task = client.post(
+        "/api/tasks",
+        json={
+            "title": "Book contractor",
+            "task_list_id": personal["id"],
+            "owner_type": "project",
+            "owner_wiki_id": project["wiki_id"],
+        },
+    ).json()
+    updated = client.patch(
+        f"/api/tasks/{project_task['id']}",
+        json={"task_list_id": errands["id"], "expected_hash": project_task["wiki_hash"]},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["task_list_id"] == errands["id"]
+    assert updated.json()["owner_type"] == "project"
+    assert updated.json()["owner_wiki_id"] == project["wiki_id"]
+
+    area_task = client.post(
+        "/api/tasks",
+        json={
+            "title": "Replace filter",
+            "task_list_id": personal["id"],
+            "owner_type": "area",
+            "owner_wiki_id": area["id"],
+        },
+    ).json()
+    area_updated = client.patch(
+        f"/api/tasks/{area_task['id']}",
+        json={"task_list_id": errands["id"], "expected_hash": area_task["wiki_hash"]},
+    )
+    assert area_updated.status_code == 200
+    assert area_updated.json()["task_list_id"] == errands["id"]
+    assert area_updated.json()["owner_type"] == "area"
+    assert area_updated.json()["owner_wiki_id"] == area["id"]
+
+
 def test_task_edits_preserve_existing_path_and_reject_owner_reassignment(tmp_path: Path) -> None:
     client, _wiki = _client(tmp_path)
     task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
