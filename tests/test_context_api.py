@@ -104,6 +104,8 @@ def test_goal_project_routine_resources_link_to_tasks(tmp_path) -> None:
         json={
             "title": "Review implementation",
             "task_list_id": task_list["id"],
+            "owner_type": "project",
+            "owner_wiki_id": project.json()["wiki_id"],
             "goal_id": goal_id,
             "project_id": project_id,
             "routine_id": routine_id,

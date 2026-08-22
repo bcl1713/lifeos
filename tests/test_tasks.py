@@ -13,7 +13,7 @@ def test_authenticated_user_can_create_complete_and_reopen_task_with_audit_histo
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
 
-    task_list = client.post("/api/task-lists", json={"name": "Personal"})
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"})
     assert task_list.status_code == 201
     list_id = task_list.json()["id"]
 
@@ -59,7 +59,7 @@ def test_task_lifecycle_metadata_and_state_transitions_are_audited(tmp_path) -> 
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    list_id = client.post("/api/task-lists", json={"name": "Inbox"}).json()["id"]
     created = client.post(
         "/api/tasks",
         json={
@@ -100,7 +100,7 @@ def test_task_api_requires_authentication_and_allows_repeated_titles(tmp_path) -
 
     assert client.get("/api/task-lists").status_code == 401
     headers = {"Authorization": "Bearer agent-secret"}
-    first = client.post("/api/task-lists", headers=headers, json={"name": "Personal"})
+    first = client.post("/api/task-lists", headers=headers, json={"name": "Inbox"})
     assert first.status_code == 201
     list_id = first.json()["id"]
 
@@ -119,7 +119,7 @@ def test_task_listing_supports_status_filter_and_pagination(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    list_id = client.post("/api/task-lists", json={"name": "Inbox"}).json()["id"]
     for title in ("First", "Second", "Third"):
         response = client.post("/api/tasks", json={"title": title, "task_list_id": list_id})
         assert response.status_code == 201
@@ -139,7 +139,7 @@ def test_task_dependencies_are_idempotent_and_reject_cycles(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    list_id = client.post("/api/task-lists", json={"name": "Inbox"}).json()["id"]
     tasks = [
         client.post("/api/tasks", json={"title": title, "task_list_id": list_id}).json() for title in ("A", "B", "C")
     ]
@@ -197,7 +197,7 @@ def test_task_dependency_mutations_require_current_parent_hash(tmp_path) -> None
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    list_id = client.post("/api/task-lists", json={"name": "Inbox"}).json()["id"]
     parent = client.post("/api/tasks", json={"title": "Parent", "task_list_id": list_id}).json()
     prerequisite = client.post("/api/tasks", json={"title": "Prerequisite", "task_list_id": list_id}).json()
 
@@ -235,7 +235,7 @@ def test_task_creation_rejects_missing_related_resources(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    list_id = client.post("/api/task-lists", json={"name": "Personal"}).json()["id"]
+    list_id = client.post("/api/task-lists", json={"name": "Inbox"}).json()["id"]
 
     response = client.post(
         "/api/tasks",

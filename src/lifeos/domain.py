@@ -239,6 +239,8 @@ class Task(Base):
     routine_id: Mapped[Optional[int]] = mapped_column(ForeignKey("routines.id", ondelete="SET NULL"))
     occurrence_key: Mapped[Optional[str]] = mapped_column(String(180), unique=True)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("tasks.id", ondelete="SET NULL"))
+    owner_wiki_id: Mapped[Optional[str]] = mapped_column(String(300))
+    owner_type: Mapped[Optional[str]] = mapped_column(String(20))
     wiki_id: Mapped[Optional[str]] = mapped_column(String(300), unique=True)
     wiki_path: Mapped[Optional[str]] = mapped_column(String(500))
     wiki_hash: Mapped[Optional[str]] = mapped_column(String(64))

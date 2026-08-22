@@ -127,6 +127,7 @@ def import_to_database(records: list[dict], database: Path, wiki_root: Path) -> 
                 audit_payload={"source": record["source"], "source_updated": record["source_updated"]},
                 audit_action="migrated",
                 initial_status=record["status"],
+                enforce_owner=False,
                 expected_hash=existing.content_hash if existing is not None else None,
                 commit=False,
             )
