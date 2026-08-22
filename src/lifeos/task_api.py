@@ -1,7 +1,7 @@
 import json
 from uuid import uuid4
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -31,6 +31,8 @@ class TaskCreate(BaseModel):
     project_id: int | None = None
     routine_id: int | None = None
     parent_id: int | None = None
+    owner_wiki_id: str | None = Field(default=None, max_length=300)
+    owner_type: Literal["project", "area", "inbox"] | None = None
 
 
 class TaskUpdate(BaseModel):
@@ -45,6 +47,8 @@ class TaskUpdate(BaseModel):
     project_id: int | None = None
     routine_id: int | None = None
     parent_id: int | None = None
+    owner_wiki_id: str | None = Field(default=None, max_length=300)
+    owner_type: Literal["project", "area", "inbox"] | None = None
     expected_hash: str | None = Field(default=None, min_length=64, max_length=64)
 
 
@@ -88,6 +92,8 @@ def serialize_task(task: Task) -> dict[str, Any]:
         "project_id": task.project_id,
         "routine_id": task.routine_id,
         "parent_id": task.parent_id,
+        "owner_wiki_id": task.owner_wiki_id,
+        "owner_type": task.owner_type,
         "wiki_id": task.wiki_id,
         "wiki_path": task.wiki_path,
         "wiki_hash": task.wiki_hash,
@@ -202,6 +208,8 @@ def sync_task_to_wiki(
             "project_wiki_id": task.project.wiki_id if task.project else None,
             "routine_wiki_id": task.routine.wiki_id if task.routine else None,
             "parent_wiki_id": task.parent.wiki_id if task.parent else None,
+            "owner_wiki_id": task.owner_wiki_id,
+            "owner_type": task.owner_type,
             "occurrence_key": task.occurrence_key,
             "depends_on": dependency_ids,
         }
@@ -219,6 +227,23 @@ def validate_task_links(session: Session, values: dict[str, Any]) -> None:
         value = values.get(field)
         if value is not None and session.get(model, value) is None:
             raise HTTPException(status_code=404, detail=f"{model.__name__} not found")
+
+
+def resolve_task_owner(
+    repository: WikiRepository, task_list: TaskList, owner_type: str | None, owner_wiki_id: str | None
+) -> tuple[str | None, str | None, Any | None]:
+    if owner_type is None and task_list.name == "Inbox":
+        owner_type = "inbox"
+    if owner_type == "inbox":
+        if task_list.name != "Inbox" or owner_wiki_id is not None:
+            raise HTTPException(status_code=422, detail="Inbox ownership requires the Inbox task list and no owner_wiki_id")
+        return "inbox", None, None
+    if owner_type not in {"project", "area"} or not owner_wiki_id:
+        raise HTTPException(status_code=422, detail="non-Inbox tasks require an explicit Project or Area owner")
+    owner = repository.find_by_id(owner_wiki_id)
+    if owner is None or owner.record_type != owner_type:
+        raise HTTPException(status_code=422, detail="task owner does not resolve to the declared canonical type")
+    return owner_type, owner.record_id, owner
 
 
 @router.get("/task-lists")
@@ -272,6 +297,7 @@ def create_canonical_task(
     initial_status: str = "open",
     expected_hash: str | None = None,
     commit: bool = True,
+    canonical_path: str | None = None,
 ) -> Task:
     task_list = session.get(TaskList, payload.task_list_id)
     if task_list is None:
@@ -281,6 +307,11 @@ def create_canonical_task(
     if repository is None:
         raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
     values = payload.model_dump()
+    owner_type, owner_wiki_id, owner = resolve_task_owner(
+        repository, task_list, payload.owner_type, payload.owner_wiki_id
+    )
+    values["owner_type"] = owner_type
+    values["owner_wiki_id"] = owner_wiki_id
     values["status"] = initial_status
     values["tags"] = json.dumps(values["tags"], sort_keys=True)
     canonical_id = record_id or f"tsk-{slugify(payload.title)}"
@@ -304,10 +335,13 @@ def create_canonical_task(
             "source_ref": payload.source_ref,
             "due_date": payload.due_date,
             "task_list": task_list.name,
+            "owner_wiki_id": owner_wiki_id,
+            "owner_type": owner_type,
             **related,
             "occurrence_key": occurrence_key,
             "depends_on": [],
         },
+        path=canonical_path or repository.task_path(owner, payload.title, canonical_id),
         expected_hash=expected_hash,
     )
     task = Task(
@@ -371,6 +405,11 @@ def update_task(
         changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
     if "task_list_id" in changes and session.get(TaskList, changes["task_list_id"]) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
+    if "owner_wiki_id" in changes or "owner_type" in changes:
+        if changes.get("owner_wiki_id", task.owner_wiki_id) != task.owner_wiki_id or changes.get("owner_type", task.owner_type) != task.owner_type:
+            raise HTTPException(status_code=409, detail="task owner changes require the controlled relocation workflow")
+        changes.pop("owner_wiki_id", None)
+        changes.pop("owner_type", None)
     validate_task_links(session, changes)
     for field, value in changes.items():
         setattr(task, field, value)

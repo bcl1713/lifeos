@@ -82,6 +82,28 @@ def _unresolved_relationships(records: list[WikiRecord]) -> list[dict[str, str]]
     return sorted(unresolved, key=lambda value: (value["id"], value["field"], value["target_id"]))
 
 
+def _invalid_task_owners(records: list[WikiRecord]) -> list[dict[str, str]]:
+    records_by_id = {record.record_id: record for record in records}
+    invalid: list[dict[str, str]] = []
+    for record in records:
+        if record.record_type != "task":
+            continue
+        owner_type = _value(record, "owner_type")
+        owner_wiki_id = _value(record, "owner_wiki_id")
+        detail = {"id": record.record_id, "owner_type": str(owner_type or ""), "owner_wiki_id": str(owner_wiki_id or "")}
+        if owner_type == "inbox" and owner_wiki_id is None and _value(record, "task_list") == "Inbox":
+            continue
+        if owner_type in {"project", "area"} and owner_wiki_id:
+            owner = records_by_id.get(str(owner_wiki_id))
+            if owner is not None and owner.record_type == owner_type:
+                continue
+            detail["reason"] = "owner type mismatch" if owner is not None else "owner is missing"
+        else:
+            detail["reason"] = "owner fields are incomplete or Inbox is invalid"
+        invalid.append(detail)
+    return sorted(invalid, key=lambda value: value["id"])
+
+
 def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, object]:
     """Report projection alignment without mutating either source."""
     discovered_records = repository.list_records()
@@ -92,6 +114,7 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         records = discovered_records
         authority_conflicts = [str(exc)]
     unresolved_relationships = _unresolved_relationships(records)
+    invalid_task_owners = _invalid_task_owners(records)
     models = {"project": Project, "goal": Goal, "routine": Routine, "task": Task}
 
     source_by_id: dict[str, list[WikiRecord]] = {}
@@ -199,6 +222,7 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         hash_conflicts,
         invalid_links,
         unresolved_relationships,
+        invalid_task_owners,
         authority_conflicts,
     )
     return {
@@ -218,6 +242,7 @@ def reconcile_wiki_projection(session, repository: WikiRepository) -> dict[str, 
         "hash_conflicts": sorted(hash_conflicts),
         "invalid_links": sorted(invalid_links, key=lambda value: (value["id"], value["path"])),
         "unresolved_relationships": unresolved_relationships,
+        "invalid_task_owners": invalid_task_owners,
         "aligned": not any(discrepancies),
     }
 
@@ -231,6 +256,12 @@ def sync_wiki_projection(session, repository: WikiRepository) -> dict[str, int]:
             for value in unresolved_relationships
         )
         raise ValueError(f"unresolved canonical relationships: {detail}")
+    invalid_task_owners = _invalid_task_owners(records)
+    if invalid_task_owners:
+        detail = "; ".join(
+            f"{value['id']} ({value['reason']})" for value in invalid_task_owners
+        )
+        raise ValueError(f"invalid task owners: {detail}")
 
     counts = {"created": 0, "updated": 0, "stale": 0, "unchanged": 0}
     canonical_area_ids = {record.record_id for record in records if record.record_type == "area"}
@@ -363,6 +394,8 @@ def sync_wiki_projection(session, repository: WikiRepository) -> dict[str, int]:
             item.source_ref = _value(record, "source_ref")
             item.due_date = _date(_value(record, "due_date"))
             item.occurrence_key = _value(record, "occurrence_key") or None
+            item.owner_wiki_id = _value(record, "owner_wiki_id") or None
+            item.owner_type = _value(record, "owner_type") or None
             item.wiki_id, item.wiki_path, item.wiki_hash = record.record_id, record.path, record.content_hash
     for item in session.scalars(select(WikiContextItem).where(WikiContextItem.source_type == "area")):
         if item.source_id not in canonical_area_ids and not item.stale:
