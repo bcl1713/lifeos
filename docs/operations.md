@@ -110,6 +110,14 @@ python scripts/sync_wiki_projection.py \
 
 The command exits `0` only when canonical source and projection align. Missing, orphaned, duplicate, stale-hash, type/path-conflict, missing-identity, or invalid-link records must be resolved or explicitly waived before deployment acceptance.
 
+### Task owner reconciliation
+
+This section records the target operator contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is not available on current `dev`; do not use it until that PR has merged and the running image includes it. Once available, task ownership will be part of the canonical-source contract. New tasks will be created only with `owner_type: project` or `area` plus an `owner_wiki_id` resolving to the same canonical type, or with `owner_type: inbox`, no owner ID, and the `Inbox` task list. The creation path will be deterministic: Project/Area tasks will live under the owning note's sibling `tasks/` directory; Inbox tasks will live under `00-Inbox/tasks/`.
+
+After #27 is deployed, `sync_wiki_projection.py --check` will report `invalid_task_owners` when a task declares incomplete ownership, an invalid Inbox combination, a missing owner, or an owner whose canonical type does not match `owner_type`. A writable sync will refuse these invalid declared-owner records before projection mutation. Until then, this category is unavailable and operators must continue using the existing reconciliation output. After implementation, ownerless legacy source records will remain discoverable and will not by themselves make this new reconciliation category fail; they will require explicit owner assignment only when a controlled migration or relocation is separately authorized.
+
+After #27 is deployed, before changing existing task ownership, take and verify the normal wiki and SQLite backups, run `--check`, and use the future controlled-relocation workflow once it is delivered. Do not hand-edit `owner_type`, `owner_wiki_id`, or `wiki_path` as a substitute: the implemented ordinary task updates will preserve the existing source path and reject owner reassignment with HTTP `409`. This delivery adds neither an automatic/live migration nor a scheduled/default-profile reconciliation job; reconciliation remains an explicit normal release, restart, recovery, or operator change-handling step.
+
 Rebuild only after verified wiki and SQLite backups:
 
 ```bash
