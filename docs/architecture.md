@@ -52,18 +52,18 @@ Tasks—including dependencies, parentage, recurrence/occurrence identity, statu
 
 `scripts/sync_wiki_projection.py --check` is the non-mutating reconciliation gate. It reports missing and orphaned projections, duplicate identities and paths, stale hashes, type/path conflicts, missing identities, and invalid source links. A writable sync must refuse ambiguous canonical identities before mutating SQLite.
 
-## Task ownership and PARA placement
+## Planned task ownership and PARA placement
 
-Each newly created canonical Task has one explicit owner type:
+The following is the authoritative target contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is prospective: it does not describe current `dev` behavior until that PR lands. Once implemented, each newly created canonical Task will have one explicit owner type:
 
 - `project` with an `owner_wiki_id` that resolves to a canonical Project;
 - `area` with an `owner_wiki_id` that resolves to a canonical Area; or
 - `inbox`, which has no `owner_wiki_id` and is valid only for the `Inbox` task list.
 
-The API rejects a new non-Inbox Task without a Project or Area owner, and rejects an Inbox owner paired with a non-Inbox task list or an owner ID. It also rejects an owner ID that does not resolve to the declared canonical type. These ownership fields are serialized in canonical task Markdown and retained in the rebuildable Task projection.
+The API will reject a new non-Inbox Task without a Project or Area owner, and will reject an Inbox owner paired with a non-Inbox task list or an owner ID. It will also reject an owner ID that does not resolve to the declared canonical type. These ownership fields will be serialized in canonical task Markdown and retained in the rebuildable Task projection.
 
-Creation chooses the canonical Markdown path deterministically. A Project or Area task is a sibling beneath its owner's directory at `<owner-directory>/tasks/<slug>-<tsk-id>.md`; an Inbox task is at `00-Inbox/tasks/<slug>-<tsk-id>.md`. For example, a task owned by `01-Projects/renovate-kitchen/index.md` is written beneath `01-Projects/renovate-kitchen/tasks/`. The exact path is retained as the task's `wiki_path` and is shown as its source in the Tasks and Today views.
+Once #27 lands, creation will choose the canonical Markdown path deterministically. A Project or Area task will be a sibling beneath its owner's directory at `<owner-directory>/tasks/<slug>-<tsk-id>.md`; an Inbox task will be at `00-Inbox/tasks/<slug>-<tsk-id>.md`. For example, a task owned by `01-Projects/renovate-kitchen/index.md` will be written beneath `01-Projects/renovate-kitchen/tasks/`. The exact path will be retained as the task's `wiki_path` and shown as its source in the Tasks and Today views.
 
-Ordinary task edits preserve the existing canonical path, even when the title changes. Changing `owner_type` or `owner_wiki_id` is deliberately not an ordinary edit: the API returns `409` and requires a separate controlled-relocation workflow. This delivery does not implement that relocation workflow, create owner-note backlinks, or change daily-note promotion behavior. Source navigation remains the existing canonical-source behavior: `wiki_path` identifies the task source, and authenticated `/sources/wiki/...` rendering resolves links from that source; a separate `source_ref` remains task provenance metadata rather than an ownership backlink.
+Once #27 lands, ordinary task edits will preserve the existing canonical path, even when the title changes. Changing `owner_type` or `owner_wiki_id` will deliberately not be an ordinary edit: the API will return `409` and require a separate controlled-relocation workflow. Neither #27 nor this documentation delivery implements that relocation workflow, creates owner-note backlinks, or changes daily-note promotion behavior. Source navigation remains the existing canonical-source behavior: `wiki_path` identifies the task source, and authenticated `/sources/wiki/...` rendering resolves links from that source; a separate `source_ref` remains task provenance metadata rather than an ownership backlink.
 
-Legacy ownerless task source records remain discoverable for compatibility. They are not a creation exception: new non-Inbox tasks fail closed until an explicit owner is supplied. Goals and Routines continue as canonical wiki records, but their retirement or any broader PARA restructuring is outside this delivery.
+After #27 lands, legacy ownerless task source records will remain discoverable for compatibility. They will not be a creation exception: new non-Inbox tasks will fail closed until an explicit owner is supplied. Goals and Routines continue as canonical wiki records, but their retirement or any broader PARA restructuring is outside this delivery.

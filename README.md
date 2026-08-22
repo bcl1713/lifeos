@@ -30,7 +30,7 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 - Rendered canonical source navigation: `docs/rendered-source-navigation.md` documents the authenticated Project/Area source affordance, safe in-wiki navigation, and optional SilverBullet canonical-link configuration.
 - Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed Task, Project, Area, Goal, and Routine projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, and invalid-link records.
 - Updates require the caller's last-seen canonical `expected_hash`; an external wiki edit produces HTTP `409` rather than a silent overwrite.
-- New Tasks use explicit PARA ownership: a Project or Area owner with its canonical wiki ID, or Inbox with no owner ID. Canonical task placement is deterministic under the owner’s `tasks/` directory or `00-Inbox/tasks/`; task relocation is a separate controlled workflow. See `docs/architecture.md` and `docs/operations.md`.
+- Planned PARA task ownership (implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27), not yet in `dev`): once that PR lands, new Tasks will use an explicit Project or Area owner with its canonical wiki ID, or Inbox with no owner ID. Canonical task placement will then be deterministic under the owner’s `tasks/` directory or `00-Inbox/tasks/`; task relocation remains a separate future controlled workflow. See `docs/architecture.md` and `docs/operations.md`.
 
 ## Local development
 
