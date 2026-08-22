@@ -110,6 +110,14 @@ python scripts/sync_wiki_projection.py \
 
 The command exits `0` only when canonical source and projection align. Missing, orphaned, duplicate, stale-hash, type/path-conflict, missing-identity, or invalid-link records must be resolved or explicitly waived before deployment acceptance.
 
+### Task owner reconciliation
+
+Task ownership is part of the canonical-source contract. New tasks are created only with `owner_type: project` or `area` plus an `owner_wiki_id` resolving to the same canonical type, or with `owner_type: inbox`, no owner ID, and the `Inbox` task list. The creation path is deterministic: Project/Area tasks live under the owning note's sibling `tasks/` directory; Inbox tasks live under `00-Inbox/tasks/`.
+
+`sync_wiki_projection.py --check` now reports `invalid_task_owners` when a task declares incomplete ownership, an invalid Inbox combination, a missing owner, or an owner whose canonical type does not match `owner_type`. A writable sync refuses these invalid declared-owner records before projection mutation. Ownerless legacy source records remain discoverable and do not by themselves make this new reconciliation category fail; they require explicit owner assignment only when a controlled migration or relocation is separately authorized.
+
+Before changing existing task ownership, take and verify the normal wiki and SQLite backups, run `--check`, and use the future controlled-relocation workflow once it is delivered. Do not hand-edit `owner_type`, `owner_wiki_id`, or `wiki_path` as a substitute: ordinary task updates preserve the existing source path and reject owner reassignment with HTTP `409`. This delivery adds neither an automatic/live migration nor a scheduled/default-profile reconciliation job; run reconciliation explicitly as part of normal release, restart, recovery, or operator change handling.
+
 Rebuild only after verified wiki and SQLite backups:
 
 ```bash
