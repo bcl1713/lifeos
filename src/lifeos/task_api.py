@@ -162,6 +162,7 @@ def sync_task_to_wiki(
     if repository is None:
         raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
     with session.no_autoflush:
+        validate_persisted_task_owner(session, task, repository)
         dependency_ids = dependency_wiki_ids if dependency_wiki_ids is not None else [
             wiki_id
             for wiki_id in session.scalars(
@@ -244,6 +245,13 @@ def resolve_task_owner(
     if owner is None or owner.record_type != owner_type:
         raise HTTPException(status_code=422, detail="task owner does not resolve to the declared canonical type")
     return owner_type, owner.record_id, owner
+
+
+def validate_persisted_task_owner(session: Session, task: Task, repository: WikiRepository) -> None:
+    task_list = session.get(TaskList, task.task_list_id)
+    if task_list is None:
+        raise HTTPException(status_code=422, detail="task owner requires an existing task list")
+    resolve_task_owner(repository, task_list, task.owner_type, task.owner_wiki_id)
 
 
 @router.get("/task-lists")

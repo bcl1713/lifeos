@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -277,3 +278,96 @@ def test_projection_rejects_unowned_non_inbox_canonical_task(tmp_path: Path) -> 
             assert "invalid task owners" in str(exc)
         else:
             raise AssertionError("projection sync accepted an unowned non-Inbox task")
+
+
+def _corrupt_task_list_projection(client: TestClient, task_id: int, task_list_id: int) -> None:
+    with client.app.state.session_factory() as session:
+        task = session.get(Task, task_id)
+        assert task is not None
+        task.task_list_id = task_list_id
+        session.commit()
+
+
+def _task_by_id(client: TestClient, task_id: int) -> dict:
+    return next(task for task in client.get("/api/tasks").json() if task["id"] == task_id)
+
+
+@pytest.mark.parametrize("mutation", ["api_status", "ui_status", "add_dependency"])
+def test_invalid_persisted_owner_rejects_writes_without_mutating_canonical_or_projection(
+    tmp_path: Path, mutation: str
+) -> None:
+    client, wiki = _client(tmp_path)
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+    personal = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    task = client.post("/api/tasks", json={"title": "Capture receipt", "task_list_id": inbox["id"]}).json()
+    prerequisite = client.post("/api/tasks", json={"title": "Prerequisite", "task_list_id": inbox["id"]}).json()
+    canonical_before = (wiki / task["wiki_path"]).read_text()
+    _corrupt_task_list_projection(client, task["id"], personal["id"])
+
+    if mutation == "api_status":
+        response = client.post(f"/api/tasks/{task['id']}/complete", params={"expected_hash": task["wiki_hash"]})
+    elif mutation == "ui_status":
+        response = client.post(f"/ui/tasks/{task['id']}/complete", data={"expected_hash": task["wiki_hash"]})
+    else:
+        response = client.post(
+            f"/api/tasks/{task['id']}/dependencies",
+            json={"depends_on_task_id": prerequisite["id"], "expected_hash": task["wiki_hash"]},
+        )
+
+    assert response.status_code == 422
+    persisted = _task_by_id(client, task["id"])
+    assert persisted["task_list_id"] == personal["id"]
+    assert persisted["status"] == "open"
+    assert persisted["wiki_path"] == task["wiki_path"]
+    assert persisted["wiki_hash"] == task["wiki_hash"]
+    assert (wiki / task["wiki_path"]).read_text() == canonical_before
+    assert client.get(f"/api/tasks/{task['id']}/dependencies").json() == []
+
+
+def test_invalid_persisted_owner_rejects_dependency_removal_without_mutation(tmp_path: Path) -> None:
+    client, wiki = _client(tmp_path)
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+    personal = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    task = client.post("/api/tasks", json={"title": "Capture receipt", "task_list_id": inbox["id"]}).json()
+    prerequisite = client.post("/api/tasks", json={"title": "Prerequisite", "task_list_id": inbox["id"]}).json()
+    added = client.post(
+        f"/api/tasks/{task['id']}/dependencies",
+        json={"depends_on_task_id": prerequisite["id"], "expected_hash": task["wiki_hash"]},
+    ).json()
+    current = _task_by_id(client, task["id"])
+    canonical_before = (wiki / current["wiki_path"]).read_text()
+    _corrupt_task_list_projection(client, task["id"], personal["id"])
+
+    response = client.delete(
+        f"/api/tasks/{task['id']}/dependencies/{added['id']}", params={"expected_hash": current["wiki_hash"]}
+    )
+
+    assert response.status_code == 422
+    persisted = _task_by_id(client, task["id"])
+    assert persisted["task_list_id"] == personal["id"]
+    assert persisted["wiki_hash"] == current["wiki_hash"]
+    assert (wiki / current["wiki_path"]).read_text() == canonical_before
+    assert [item["id"] for item in client.get(f"/api/tasks/{task['id']}/dependencies").json()] == [added["id"]]
+
+
+@pytest.mark.parametrize("owner_type", ["project", "area"])
+def test_valid_para_owned_task_status_write_remains_supported(tmp_path: Path, owner_type: str) -> None:
+    client, wiki = _client(tmp_path)
+    personal = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    owner = client.post(f"/api/{owner_type}s", json={"title": "Renovate kitchen"}).json()
+    task = client.post(
+        "/api/tasks",
+        json={
+            "title": "Book contractor",
+            "task_list_id": personal["id"],
+            "owner_type": owner_type,
+            "owner_wiki_id": owner["wiki_id"] if owner_type == "project" else owner["id"],
+        },
+    ).json()
+
+    completed = client.post(f"/api/tasks/{task['id']}/complete", params={"expected_hash": task["wiki_hash"]})
+
+    assert completed.status_code == 200
+    assert completed.json()["owner_type"] == owner_type
+    assert completed.json()["owner_wiki_id"] == task["owner_wiki_id"]
+    assert (wiki / completed.json()["wiki_path"]).is_file()
