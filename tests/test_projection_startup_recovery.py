@@ -38,6 +38,8 @@ def _write_incident_fixture(wiki: Path, *, project_id: str = ARCHIVED_PROJECT_ID
             "id": ACTIVE_TASK_ID,
             "status": "open",
             "task_list": "Inbox",
+            "owner_type": "project",
+            "owner_wiki_id": project_id,
             "project_wiki_id": project_id,
         },
     )

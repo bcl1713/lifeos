@@ -22,7 +22,7 @@ def test_scheduler_generation_writes_canonical_task_and_advances_routine(tmp_pat
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={
@@ -63,7 +63,7 @@ def test_scheduler_writes_canonical_task_before_projection(tmp_path: Path, monke
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     client.post(
         "/api/routines",
         json={
@@ -105,15 +105,14 @@ def test_same_title_routines_generate_distinct_canonical_occurrences(tmp_path: P
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    first_list = client.post("/api/task-lists", json={"name": "First"}).json()
-    second_list = client.post("/api/task-lists", json={"name": "Second"}).json()
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     first = client.post(
         "/api/routines",
-        json={"title": "Review", "cadence": "daily", "task_list_id": first_list["id"], "start_date": "2026-08-13"},
+        json={"title": "Review", "cadence": "daily", "task_list_id": inbox["id"], "start_date": "2026-08-13"},
     ).json()
     second = client.post(
         "/api/routines",
-        json={"title": "Review", "cadence": "daily", "task_list_id": second_list["id"], "start_date": "2026-08-13"},
+        json={"title": "Review", "cadence": "daily", "task_list_id": inbox["id"], "start_date": "2026-08-13"},
     ).json()
 
     assert first["wiki_id"] != second["wiki_id"]
@@ -140,7 +139,7 @@ def test_stale_routine_hash_does_not_create_occurrence_file(tmp_path: Path) -> N
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={"title": "Guard generation", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-13"},
@@ -166,7 +165,7 @@ def test_scheduler_rejects_routine_identity_path_disagreement_before_writes(tmp_
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     first = client.post(
         "/api/routines",
         json={"title": "First routine", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-13"},
@@ -202,7 +201,7 @@ def test_scheduler_rejects_non_routine_id_without_path_before_writes(tmp_path: P
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={"title": "Wrong type guard", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-13"},
@@ -210,7 +209,7 @@ def test_scheduler_rejects_non_routine_id_without_path_before_writes(tmp_path: P
     canonical_task = app.state.wiki_repository.write(
         "task",
         "Canonical task owner",
-        {"id": "tsk-not-a-routine", "status": "open", "task_list": "Routines"},
+        {"id": "tsk-not-a-routine", "status": "open", "task_list": "Inbox", "owner_type": "inbox"},
     )
     routine_path = wiki / routine["wiki_path"]
     task_path = wiki / canonical_task.path
@@ -248,7 +247,7 @@ def test_post_occurrence_failure_reports_reconciliation_required(tmp_path: Path,
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={"title": "Partial generation", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-13"},

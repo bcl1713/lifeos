@@ -9,7 +9,7 @@ from sqlalchemy import select
 import pytest
 
 from lifeos.db import create_engine, create_session_factory
-from lifeos.domain import AuditRecord, Task
+from lifeos.domain import AuditRecord, Task, TaskList
 from lifeos.google_tasks_migration import import_to_database, select_for_migration, to_lifeos_record
 from lifeos.wiki_store import WikiConflictError, WikiRepository
 
@@ -100,6 +100,7 @@ def test_staging_import_is_idempotent_and_audited(tmp_path) -> None:
         assert task is not None
         assert task.wiki_id
         assert task.wiki_path
+        assert session.get(TaskList, task.task_list_id).name == "Inbox"
         completed = session.scalar(select(Task).where(Task.title == "Imported completed"))
         assert completed is not None
         assert completed.status == "completed"
@@ -108,6 +109,9 @@ def test_staging_import_is_idempotent_and_audited(tmp_path) -> None:
     assert record is not None
     assert record.fields["status"] == "open"
     assert record.fields["notes"].startswith("Source: google-tasks:a:1")
+    assert record.fields["task_list"] == "Inbox"
+    assert record.fields["owner_type"] == "inbox"
+    assert record.fields["owner_wiki_id"] is None
     completed_record = WikiRepository(wiki).find_by_id(completed.wiki_id)
     assert completed_record is not None
     assert completed_record.fields["status"] == "completed"

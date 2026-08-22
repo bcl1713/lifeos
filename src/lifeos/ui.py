@@ -1,6 +1,7 @@
 from datetime import date
 import os
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -58,11 +59,15 @@ def render_tasks(request: Request, username: str, session: Session, *, all_tasks
         query = query.where(Task.status == "open")
     tasks = list(session.scalars(query))
     task_lists = list(session.scalars(select(TaskList).order_by(TaskList.name)))
+    repository: WikiRepository | None = session.info.get("wiki_repository")
+    task_owners = [] if repository is None else sorted(
+        repository.list_records("project") + repository.list_records("area"), key=lambda record: (record.record_type, record.title)
+    )
     template = "tasks.html" if all_tasks else "today.html"
     return templates.TemplateResponse(
         request=request,
         name=template,
-        context={"username": username, "tasks": tasks, "task_lists": task_lists, "today": date.today()},
+        context={"username": username, "tasks": tasks, "task_lists": task_lists, "task_owners": task_owners, "today": date.today()},
     )
 
 
@@ -125,6 +130,8 @@ def create_ui_task(
     task_list_id: int = Form(...),
     notes: str = Form(default=""),
     due_date: str = Form(default=""),
+    owner_type: Literal["project", "area", "inbox"] = Form(default="inbox"),
+    owner_wiki_id: str = Form(default=""),
     username: str = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
@@ -137,6 +144,8 @@ def create_ui_task(
             notes=notes.strip() or None,
             due_date=parsed_due_date,
             task_list_id=task_list_id,
+            owner_type=owner_type,
+            owner_wiki_id=owner_wiki_id or None,
         ),
         actor=username,
         session=session,

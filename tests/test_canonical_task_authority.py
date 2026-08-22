@@ -39,7 +39,8 @@ def test_empty_projection_rebuild_preserves_canonical_task_identity_and_list_nam
         {
             "id": "tsk-rebuild-me",
             "status": "open",
-            "task_list": "Household",
+            "task_list": "Inbox",
+            "owner_type": "inbox",
             "priority": 2,
             "tags": ["home"],
         },
@@ -57,5 +58,5 @@ def test_empty_projection_rebuild_preserves_canonical_task_identity_and_list_nam
         task = session.query(Task).one()
         assert result["created"] == 1
         assert task.wiki_id == record.record_id
-        assert task.task_list.name == "Household"
+        assert task.task_list.name == "Inbox"
         assert task.tags == '["home"]'

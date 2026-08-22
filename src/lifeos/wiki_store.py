@@ -124,6 +124,15 @@ class WikiRepository:
         base = self.root / (parent or "01-Projects/LifeOS") / "lifeos" / f"{record_type}s"
         return base / f"{slugify(title)}-{record_id or slugify(title)}.md"
 
+    def task_path(self, owner: WikiRecord | None, title: str, record_id: str) -> str:
+        if owner is None:
+            target = self.root / "00-Inbox" / "tasks" / f"{slugify(title)}-{record_id}.md"
+        else:
+            if owner.record_type not in {"project", "area"}:
+                raise ValueError("task owner must be a project or area")
+            target = (self.root / owner.path).parent / "tasks" / f"{slugify(title)}-{record_id}.md"
+        return target.relative_to(self.root).as_posix()
+
     def _atomic_write(self, target: Path, text: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         existing_stat = target.stat() if target.exists() else None

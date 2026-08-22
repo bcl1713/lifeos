@@ -25,7 +25,7 @@ def test_task_dependencies_round_trip_through_canonical_wiki_ids(tmp_path: Path)
     )
     client = TestClient(source_app)
     _login(client)
-    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     dependent = client.post("/api/tasks", json={"title": "Dependent", "task_list_id": task_list["id"]}).json()
     prerequisite = client.post("/api/tasks", json={"title": "Prerequisite", "task_list_id": task_list["id"]}).json()
 

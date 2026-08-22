@@ -11,7 +11,7 @@ def test_wiki_edit_rebuilds_task_projection(tmp_path: Path) -> None:
     path = wiki / "01-Projects/example/lifeos/tasks/review.md"
     path.parent.mkdir(parents=True)
     path.write_text(
-        "---\nid: tsk-review\ntype: task\nstatus: open\npriority: 2\ndue_date: 2026-08-20\ntags: [focus]\n---\n# Review\n",
+        "---\nid: tsk-review\ntype: task\nstatus: open\ntask_list: Inbox\nowner_type: inbox\npriority: 2\ndue_date: 2026-08-20\ntags: [focus]\n---\n# Review\n",
         encoding="utf-8",
     )
     engine = create_engine(f"sqlite:///{tmp_path / 'lifeos.db'}")
@@ -27,7 +27,7 @@ def test_wiki_edit_rebuilds_task_projection(tmp_path: Path) -> None:
         assert task.due_date.isoformat() == "2026-08-20"
         assert task.tags == '["focus"]'
     path.write_text(
-        "---\nid: tsk-review\ntype: task\nstatus: completed\npriority: 2\ndue_date: 2026-08-20\ntags: [focus]\n---\n# Review\n",
+        "---\nid: tsk-review\ntype: task\nstatus: completed\ntask_list: Inbox\nowner_type: inbox\npriority: 2\ndue_date: 2026-08-20\ntags: [focus]\n---\n# Review\n",
         encoding="utf-8",
     )
     with factory() as session:
