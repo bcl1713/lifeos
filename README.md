@@ -27,6 +27,7 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 - Phase 10 test validation: `python scripts/validate_phase10_tests.py .` checks the required focused test matrix, recovery artifacts, and source secret hygiene.
 - Whole-project intent validation: `python scripts/validate_project_intent.py .` checks promised deliverables and current operator documentation against the stated LifeOS intent.
 - Wiki-backed portal architecture: `docs/architecture.md` and `docs/plans/2026-08-12-wiki-backed-portal.md` define the canonical Markdown contract, bidirectional LifeOS/wiki editing model, staged reconciliation, and cutover verification. LifeOS is not a second writable knowledge base.
+- Rendered canonical source navigation: `docs/rendered-source-navigation.md` documents the authenticated Project/Area source affordance, safe in-wiki navigation, and optional SilverBullet canonical-link configuration.
 - Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed Task, Project, Area, Goal, and Routine projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, and invalid-link records.
 - Updates require the caller's last-seen canonical `expected_hash`; an external wiki edit produces HTTP `409` rather than a silent overwrite.
 
@@ -44,7 +45,13 @@ The development health endpoint is available at `http://127.0.0.1:8000/healthz`.
 
 ## Release model
 
-Releases use semantic-version tags in the form `vMAJOR.MINOR.PATCH`. A tag such as `v0.1.0` runs the release workflow, builds the production image, and publishes it to GHCR as both the version tag and immutable commit SHA tag. Production deployment must use an explicit version tag or digest, never `latest`.
+The package version is the `[project].version` value in `pyproject.toml`. Release artifacts are immutable and always use an explicit version or `sha-<commit>` tag; production deployment must use an explicit version tag or digest, never `latest`.
+
+- A successful push or merge to `dev` first runs verification, tests, and the package build. Only after those checks pass does it publish the unique candidate `v<next-patch>-dev.<GitHub-run-number>` and `sha-<commit>` tags to `ghcr.io/bcl1713/lifeos` and create a GitHub prerelease. The candidate's patch number is one greater than `[project].version`.
+- Pull-request pushes and failed checks publish no image or release. This workflow does not publish a mutable `dev` convenience tag, `latest`, a stable tag, or perform an automatic deployment or production promotion.
+- RC publication remains a manual dispatch from `dev` with an explicit `vMAJOR.MINOR.PATCH-rc.N` version. Stable `vMAJOR.MINOR.PATCH` releases remain `main`-only, after Brian approves the `dev` → `main` release gate.
+
+Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After publication, verify the GitHub Release and resolve both the candidate/version tag and its `sha-<commit>` tag to the same image digest before testing or promotion. Deployment configuration and rollout remain separate, explicit changes in `bcl1713/homelab-stacks`.
 
 ## Boundaries
 

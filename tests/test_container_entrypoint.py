@@ -20,6 +20,19 @@ def test_entrypoint_preserves_only_explicit_supplementary_gids() -> None:
     assert "umask 0002" in script
 
 
+def test_container_build_embeds_release_identity_and_workflow_passes_it() -> None:
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "ARG LIFEOS_BUILD_VERSION=local-dev" in dockerfile
+    assert "ARG LIFEOS_BUILD_REVISION=unknown" in dockerfile
+    assert "org.opencontainers.image.version=$LIFEOS_BUILD_VERSION" in dockerfile
+    assert "org.opencontainers.image.revision=$LIFEOS_BUILD_REVISION" in dockerfile
+    assert "src/lifeos/build_info.py" in dockerfile
+    assert "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}" in workflow
+    assert "LIFEOS_BUILD_REVISION=${{ github.sha }}" in workflow
+
+
 def test_entrypoint_validates_supplementary_gids_before_privilege_drop() -> None:
     script = Path("docker-entrypoint.sh").read_text(encoding="utf-8")
 

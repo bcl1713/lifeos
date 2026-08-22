@@ -1,16 +1,80 @@
-name: Release container
+name: Publish release container
 
 on:
   push:
+    branches: [dev]
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_candidate_version:
+        description: SemVer release candidate to publish (for example v0.7.0-rc.1)
+        required: true
+        type: string
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.release.outputs.channel }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release channel and version
+        id: release
+        env:
+          RELEASE_CANDIDATE_VERSION: ${{ inputs.release_candidate_version }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            version="$(python scripts/validate_release_policy.py --mode dev --run-number "$GITHUB_RUN_NUMBER" --package-file pyproject.toml)"
+            echo "channel=dev" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${{ github.ref }}" != "refs/heads/dev" ]; then
+              echo "release candidates can only be dispatched from dev" >&2
+              exit 1
+            fi
+            python scripts/validate_release_policy.py \
+              --mode rc --version "$RELEASE_CANDIDATE_VERSION" --package-file pyproject.toml
+            echo "channel=rc" >> "$GITHUB_OUTPUT"
+            echo "version=$RELEASE_CANDIDATE_VERSION" >> "$GITHUB_OUTPUT"
+          else
+            python scripts/validate_release_policy.py \
+              --mode stable --version "$GITHUB_REF_NAME" --package-file pyproject.toml
+            git fetch origin main --no-tags
+            release_commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+            main_commit="$(git rev-parse "origin/main^{commit}")"
+            if [ "$release_commit" != "$main_commit" ]; then
+              echo "stable release tags must point to the current main commit" >&2
+              exit 1
+            fi
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: uv sync --extra test --frozen
+      - name: Run tests
+        run: uv run pytest
+      - name: Build package
+        run: uv build
   publish:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,20 +86,81 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Require immutable image tags
+        id: immutable_tags
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA_TAG: sha-${{ github.sha }}
+        run: |
+          set -euo pipefail
+          version_digest=""
+          if docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" >/dev/null 2>&1; then
+            version_digest="$(docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" --format '{{.Manifest.Digest}}')"
+          fi
+          sha_digest=""
+          if docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$SHA_TAG" >/dev/null 2>&1; then
+            sha_digest="$(docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$SHA_TAG" --format '{{.Manifest.Digest}}')"
+            echo "sha_unpublished=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha_unpublished=true" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$version_digest" ]; then
+            if [ -z "$sha_digest" ] || [ "$version_digest" != "$sha_digest" ]; then
+              echo "refusing to overwrite existing image tag: $VERSION" >&2
+              exit 1
+            fi
+            echo "version_unpublished=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_unpublished=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Extract image metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/bcl1713/lifeos
           tags: |
-            type=ref,event=tag
-            type=sha
+            type=raw,value=${{ needs.verify.outputs.version }}
+            type=raw,value=sha-${{ github.sha }},enable=${{ steps.immutable_tags.outputs.sha_unpublished }}
       - name: Build and publish
+        if: steps.immutable_tags.outputs.sha_unpublished == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}
+            LIFEOS_BUILD_REVISION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Publish existing commit image as release version
+        if: steps.immutable_tags.outputs.sha_unpublished != 'true' && steps.immutable_tags.outputs.version_unpublished == 'true'
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA_TAG: sha-${{ github.sha }}
+        run: |
+          docker buildx imagetools create --tag "ghcr.io/bcl1713/lifeos:$VERSION" "ghcr.io/bcl1713/lifeos:$SHA_TAG"
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHANNEL: ${{ needs.verify.outputs.channel }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            existing_target="$(gh release view "$VERSION" --json targetCommitish --jq .targetCommitish)"
+            if [ "$existing_target" != "$GITHUB_SHA" ]; then
+              echo "refusing to alter release with a different target: $VERSION" >&2
+              exit 1
+            fi
+            if [ "$CHANNEL" = "stable" ]; then
+              echo "refusing to alter an existing stable release: $VERSION" >&2
+              exit 1
+            fi
+            gh release edit "$VERSION" --title "$VERSION" --prerelease
+          elif [ "$CHANNEL" = "rc" ] || [ "$CHANNEL" = "dev" ]; then
+            gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes --prerelease
+          else
+            gh release create "$VERSION" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+          fi

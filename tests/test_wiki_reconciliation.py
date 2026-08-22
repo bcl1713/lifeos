@@ -118,7 +118,7 @@ def test_projection_sync_refuses_duplicate_canonical_ids_before_mutation(tmp_pat
     factory = create_session_factory(engine)
 
     with factory() as session:
-        with pytest.raises(ValueError, match="duplicate canonical wiki IDs"):
+        with pytest.raises(ValueError, match="ambiguous canonical wiki IDs"):
             sync_wiki_projection(session, repository)
         assert session.query(Goal).count() == 0
 

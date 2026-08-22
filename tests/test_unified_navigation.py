@@ -11,7 +11,8 @@ def _canonical_wiki(root: Path) -> None:
     project.parent.mkdir(parents=True)
     area.parent.mkdir(parents=True)
     project.write_text(
-        "---\nid: prj-demo\ntype: project\nstatus: active\nsummary: Canonical demo\n---\n# Demo Project\n",
+        "---\nid: prj-demo\ntype: project\nstatus: active\nsummary: Canonical demo\n---\n"
+        "# Demo Project\n\n## Overview\n\nSee [[02-Areas/House/index|House]].\n\n```text\ncanonical\n```\n",
         encoding="utf-8",
     )
     area.write_text(
@@ -53,6 +54,33 @@ def test_primary_navigation_has_one_project_surface_and_no_wiki_surface(tmp_path
     assert "Home operations" in areas.text
     assert old_context.status_code == 308
     assert old_context.headers["location"] == "/projects"
+
+
+def test_project_canonical_note_renders_markdown_and_navigates_to_linked_area(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    _canonical_wiki(wiki)
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+
+    projects = client.get("/projects")
+    source = client.get("/sources/wiki/01-Projects/Demo%20Project/Index.md")
+    area = client.get("/sources/wiki/02-Areas/House/index.md")
+
+    assert "/sources/wiki/01-Projects/Demo%20Project/Index.md" in projects.text
+    assert '<h1>Demo Project</h1>' in source.text
+    assert '<h2>Overview</h2>' in source.text
+    assert '<a href="/sources/wiki/02-Areas/House/index.md">House</a>' in source.text
+    assert '<pre><code>canonical' in source.text
+    assert "&lt;h1&gt;Demo Project" not in source.text
+    assert area.status_code == 200
+    assert '<h1>House</h1>' in area.text
 
 
 def test_projects_view_ignores_projection_only_project(tmp_path: Path) -> None:

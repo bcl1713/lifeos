@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }} · LifeOS{% endblock %}
+
+{% block content %}
+<section class="source-page">
+  <div class="source-context">
+    <nav aria-label="Source context">
+      <ol class="breadcrumbs">
+        <li><a href="/">LifeOS</a></li>
+        {% if section %}<li><a href="{{ section.href }}">{{ section.label }}</a></li>{% endif %}
+        <li aria-current="page">{{ title }}</li>
+      </ol>
+    </nav>
+    <p class="source-label">Canonical Markdown <span aria-hidden="true">·</span> read-only</p>
+    <div class="source-path-row">
+      <code class="source-path" id="source-path">{{ source_path }}</code>
+      <button type="button" class="copy-path" data-copy-path aria-describedby="copy-path-status" hidden>Copy path</button>
+      <span class="sr-only" id="copy-path-status" aria-live="polite"></span>
+    </div>
+  </div>
+  <article class="markdown-body">
+    {{ rendered | safe }}
+  </article>
+</section>
+<script>
+  (() => {
+    const button = document.querySelector('[data-copy-path]');
+    const path = document.getElementById('source-path');
+    const status = document.getElementById('copy-path-status');
+    if (!button || !path || !status || !navigator.clipboard) return;
+    button.hidden = false;
+    button.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(path.textContent);
+        status.textContent = 'Path copied';
+      } catch (_) {
+        status.textContent = 'Copy unavailable. Select the path and copy it manually.';
+      }
+    });
+  })();
+</script>
+{% endblock %}
