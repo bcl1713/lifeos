@@ -186,3 +186,33 @@ def test_projection_round_trip_keeps_owner_and_rejects_invalid_owner_type(tmp_pa
             assert "invalid task owners" in str(exc)
         else:
             raise AssertionError("projection sync accepted an invalid task owner")
+
+
+def test_projection_rejects_unowned_non_inbox_canonical_task(tmp_path: Path) -> None:
+    repository = WikiRepository(tmp_path / "wiki")
+    task = repository.write(
+        "task",
+        "Unowned personal task",
+        {"id": "tsk-unowned-personal", "status": "open", "task_list": "Personal", "depends_on": []},
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'lifeos.db'}")
+    initialize_database(engine)
+    factory = create_session_factory(engine)
+
+    with factory() as session:
+        report = reconcile_wiki_projection(session, repository)
+        assert report["invalid_task_owners"] == [
+            {
+                "id": task.record_id,
+                "owner_type": "",
+                "owner_wiki_id": "",
+                "reason": "owner fields are incomplete or Inbox is invalid",
+            }
+        ]
+        assert report["aligned"] is False
+        try:
+            sync_wiki_projection(session, repository)
+        except ValueError as exc:
+            assert "invalid task owners" in str(exc)
+        else:
+            raise AssertionError("projection sync accepted an unowned non-Inbox task")

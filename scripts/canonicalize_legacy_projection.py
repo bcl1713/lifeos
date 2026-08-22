@@ -85,6 +85,14 @@ def _record_fields(
         fields["task_list"] = item.task_list.name
         fields["goal_wiki_id"] = goal_ids.get(item.goal_id) if item.goal_id else None
         fields["project_wiki_id"] = project_ids.get(item.project_id) if item.project_id else None
+        if item.project_id:
+            fields["owner_type"] = "project"
+            fields["owner_wiki_id"] = project_ids[item.project_id]
+        elif item.task_list.name == "Inbox":
+            fields["owner_type"] = "inbox"
+            fields["owner_wiki_id"] = None
+        else:
+            raise ValueError("legacy task requires a Project owner or the Inbox task list")
         fields["routine_wiki_id"] = routine_ids.get(item.routine_id) if item.routine_id else None
         fields["parent_wiki_id"] = task_ids.get(item.parent_id) if item.parent_id else None
         dependency_ids = session.scalars(

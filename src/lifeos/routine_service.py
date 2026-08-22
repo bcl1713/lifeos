@@ -100,7 +100,6 @@ def generate_routine_tasks(session: Session, routine: Routine, through: date, ac
                     occurrence_key=occurrence_key,
                     audit_payload={"routine_id": routine.id, "occurrence_date": occurrence.isoformat()},
                     commit=False,
-                    enforce_owner=False,
                 )
                 generated += 1
             routine.next_run_date = advance_occurrence(occurrence, routine.cadence)

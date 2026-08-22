@@ -16,7 +16,7 @@ def test_scheduler_once_generates_due_routine_tasks(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={

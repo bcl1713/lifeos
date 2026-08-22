@@ -27,7 +27,7 @@ def test_minimum_frequency_compliance_reporting(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Compliance"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={
@@ -109,7 +109,7 @@ def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={
@@ -133,6 +133,7 @@ def test_routine_generation_catches_up_and_is_idempotent(tmp_path) -> None:
     tasks = client.get("/api/tasks", params={"limit": 10}).json()
     assert [task["due_date"] for task in tasks] == ["2026-08-11", "2026-08-12", "2026-08-13"]
     assert all(task["routine_id"] == routine_id for task in tasks)
+    assert all(task["owner_type"] == "inbox" for task in tasks)
     assert client.get("/api/routines").json()[0]["next_run_date"] == "2026-08-14"
 
 
@@ -145,7 +146,7 @@ def test_routine_skip_requires_current_routine_hash(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={
@@ -189,7 +190,7 @@ def test_generate_all_routines_processes_active_routines_once(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     for title in ("Feed pets", "Review calendar"):
         response = client.post(
             "/api/routines",
@@ -217,7 +218,7 @@ def test_routine_skip_advances_without_creating_an_occurrence(tmp_path) -> None:
     )
     client = TestClient(app)
     client.post("/auth/login", json={"username": "brian", "password": "password"})
-    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
     routine = client.post(
         "/api/routines",
         json={"title": "Stretch", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-11"},
@@ -242,3 +243,25 @@ def test_routine_skip_advances_without_creating_an_occurrence(tmp_path) -> None:
     assert generated.json()["generated"] == 1
     tasks = client.get("/api/tasks", params={"limit": 10}).json()
     assert [task["due_date"] for task in tasks] == ["2026-08-12"]
+
+
+def test_routine_generation_rejects_non_inbox_task_list_before_writing_a_task(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
+        auth_username="brian",
+        auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
+    )
+    client = TestClient(app)
+    client.post("/auth/login", json={"username": "brian", "password": "password"})
+    task_list = client.post("/api/task-lists", json={"name": "Routines"}).json()
+    routine = client.post(
+        "/api/routines",
+        json={"title": "Take bins out", "cadence": "daily", "task_list_id": task_list["id"], "start_date": "2026-08-11"},
+    ).json()
+
+    generated = client.post(f"/api/routines/{routine['id']}/generate", params={"on": "2026-08-11"})
+
+    assert generated.status_code == 422
+    assert generated.json()["detail"] == "non-Inbox tasks require an explicit Project or Area owner"
+    assert client.get("/api/tasks", params={"limit": 10}).json() == []

@@ -297,7 +297,7 @@ def create_canonical_task(
     initial_status: str = "open",
     expected_hash: str | None = None,
     commit: bool = True,
-    enforce_owner: bool = True,
+    canonical_path: str | None = None,
 ) -> Task:
     task_list = session.get(TaskList, payload.task_list_id)
     if task_list is None:
@@ -307,12 +307,9 @@ def create_canonical_task(
     if repository is None:
         raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
     values = payload.model_dump()
-    if enforce_owner:
-        owner_type, owner_wiki_id, owner = resolve_task_owner(
-            repository, task_list, payload.owner_type, payload.owner_wiki_id
-        )
-    else:
-        owner_type, owner_wiki_id, owner = payload.owner_type, payload.owner_wiki_id, None
+    owner_type, owner_wiki_id, owner = resolve_task_owner(
+        repository, task_list, payload.owner_type, payload.owner_wiki_id
+    )
     values["owner_type"] = owner_type
     values["owner_wiki_id"] = owner_wiki_id
     values["status"] = initial_status
@@ -344,7 +341,7 @@ def create_canonical_task(
             "occurrence_key": occurrence_key,
             "depends_on": [],
         },
-        path=repository.task_path(owner, payload.title, canonical_id) if enforce_owner else None,
+        path=canonical_path or repository.task_path(owner, payload.title, canonical_id),
         expected_hash=expected_hash,
     )
     task = Task(

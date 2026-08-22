@@ -8,7 +8,7 @@ from sqlalchemy import select
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.domain import Task, TaskList
 from lifeos.task_api import TaskCreate, create_canonical_task
-from lifeos.wiki_store import WikiConflictError, WikiRepository
+from lifeos.wiki_store import WikiConflictError, WikiRecord, WikiRepository
 
 
 def load_export(path: Path) -> list[dict]:
@@ -70,10 +70,10 @@ def import_to_database(records: list[dict], database: Path, wiki_root: Path) -> 
     with factory() as session:
         session.info["wiki_repository"] = WikiRepository(wiki_root)
         repository: WikiRepository = session.info["wiki_repository"]
-        preflight: list[tuple[dict, str, object | None, bool]] = []
+        preflight: list[tuple[dict, str, WikiRecord | None, bool]] = []
         seen_sources: set[str] = set()
         seen_ids: set[str] = set()
-        canonical_by_id: dict[str, list[object]] = {}
+        canonical_by_id: dict[str, list[WikiRecord]] = {}
         for canonical_record in repository.list_records():
             canonical_by_id.setdefault(canonical_record.record_id, []).append(canonical_record)
         for record in records:
@@ -101,18 +101,15 @@ def import_to_database(records: list[dict], database: Path, wiki_root: Path) -> 
                 raise WikiConflictError("Google Tasks projection identity requires reconciliation")
             preflight.append((record, canonical_id, existing, bool(projected)))
 
-        lists: dict[str, TaskList] = {}
+        inbox = session.scalar(select(TaskList).where(TaskList.name == "Inbox"))
+        if inbox is None:
+            inbox = TaskList(name="Inbox")
+            session.add(inbox)
+            session.flush()
         for record, canonical_id, existing, already_projected in preflight:
             if already_projected:
                 skipped += 1
                 continue
-            list_name = record["list_name"]
-            task_list = lists.get(list_name) or session.scalar(select(TaskList).where(TaskList.name == list_name))
-            if task_list is None:
-                task_list = TaskList(name=list_name)
-                session.add(task_list)
-                session.flush()
-            lists[list_name] = task_list
             create_canonical_task(
                 session,
                 TaskCreate(
@@ -120,14 +117,15 @@ def import_to_database(records: list[dict], database: Path, wiki_root: Path) -> 
                     notes=record["notes"],
                     source_ref=record["source"],
                     due_date=date.fromisoformat(record["due_date"]) if record["due_date"] else None,
-                    task_list_id=task_list.id,
+                    task_list_id=inbox.id,
+                    owner_type="inbox",
                 ),
                 "google-tasks-migration",
                 record_id=canonical_id,
                 audit_payload={"source": record["source"], "source_updated": record["source_updated"]},
                 audit_action="migrated",
                 initial_status=record["status"],
-                enforce_owner=False,
+                canonical_path=existing.path if existing is not None else None,
                 expected_hash=existing.content_hash if existing is not None else None,
                 commit=False,
             )

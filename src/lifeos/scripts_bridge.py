@@ -90,8 +90,6 @@ def _invalid_task_owners(records: list[WikiRecord]) -> list[dict[str, str]]:
             continue
         owner_type = _value(record, "owner_type")
         owner_wiki_id = _value(record, "owner_wiki_id")
-        if owner_type is None and owner_wiki_id is None:
-            continue
         detail = {"id": record.record_id, "owner_type": str(owner_type or ""), "owner_wiki_id": str(owner_wiki_id or "")}
         if owner_type == "inbox" and owner_wiki_id is None and _value(record, "task_list") == "Inbox":
             continue
