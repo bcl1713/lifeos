@@ -1,9 +1,11 @@
 # Rendered canonical source navigation
 
-LifeOS presents Projects and Areas as authenticated working views over the
-canonical wiki. Each record includes its canonical root-relative Markdown path
-and an **Open canonical note** action. The path and action identify the durable
-source; they do not create a separate LifeOS copy of the record.
+LifeOS presents Projects, Areas, and their Tasks as authenticated working views over the
+canonical wiki. Project and Area records include their canonical root-relative Markdown path and an
+**Open canonical note** action. Today and Tasks show a Task's source path and, when
+that projected path safely resolves to canonical Markdown, an **Open canonical task
+source** action. These paths and actions identify the durable source; they do not
+create a separate LifeOS copy of a record.
 
 ## Using the rendered source view
 
@@ -86,8 +88,8 @@ Before rendering, the source route validates that the requested canonical path
 stays within the wiki root and rejects unavailable or symlink-unsafe sources.
 
 The source route itself is authenticated. A direct request without a session is
-rejected. An unavailable canonical source cannot be rendered; the Project or Area
-view shows its diagnostic instead of an **Open canonical note** link.
+rejected. An unavailable canonical source cannot be rendered; Project, Area, and
+Task views show a diagnostic or plain source text instead of an unsafe link.
 
 ## Canonical source guarantees
 
