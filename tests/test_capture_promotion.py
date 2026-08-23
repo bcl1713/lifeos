@@ -1,3 +1,13 @@
+"""Fixture-only capture-promotion contracts.
+
+The reviewed scanner envelope is the scanner's unmodified proposal
+(``capture_id``, ``source_path``, ``source_line``, exact-line ``source_hash``,
+``title``, ``target`` of ``{type, id, path}``, ``due``, and ``priority``) plus a
+durable approval. Approval contains ``approval_id``, ``approved_proposal`` equal
+to that full proposal, and the SHA-256 ``proposal_fingerprint`` of canonical JSON.
+The bridge must derive task fields and owner-local placement from this envelope;
+callers must not translate it into ``task`` or ``{owner_id, task_list}``.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -18,6 +28,7 @@ from lifeos.capture_promotion import (
     apply_reviewed_capture,
     generate_review_record,
 )
+from lifeos.daily_capture_scan import scan_daily_captures
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.domain import Task, TaskList
 from lifeos.scripts_bridge import reconcile_wiki_projection
@@ -46,6 +57,29 @@ def _approval(proposal: dict[str, object]) -> dict[str, object]:
         "source_hash": proposal["source_hash"],
         "target": proposal["target"],
     }
+
+
+def _scanner_approval(proposal: dict[str, object]) -> dict[str, object]:
+    canonical = json.dumps(proposal, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {
+        "approval_id": "apr-2026-08-23-scanner-01",
+        "approved_proposal": proposal,
+        "proposal_fingerprint": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    }
+
+
+def _scan_fixture_proposal(repository: WikiRepository) -> tuple[Path, dict[str, object]]:
+    capture = repository.root / "Daily/2026-08-23.md"
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        "- [ ] [lifeos-capture id=cap-2026-08-23-scanned target=inbox due=2026-08-30 priority=2] "
+        "Follow up with supplier\n",
+        encoding="utf-8",
+    )
+    report = scan_daily_captures(repository, daily_root="Daily", start="2026-08-23", end="2026-08-23")
+    assert report["exceptions"] == []
+    return capture, report["proposals"][0]
 
 
 def _setup(tmp_path: Path):
@@ -82,6 +116,51 @@ def test_reviewed_capture_apply_writes_one_owner_local_task_and_idempotent_recei
         assert repository.find_by_id(task.wiki_id).fields["capture_promotion"]["approval_id"] == "apr-2026-08-23-01"
         assert capture.read_text(encoding="utf-8").count("capture-receipt: cap-2026-08-23-follow-up") == 1
         assert reconcile_wiki_projection(session, repository)["aligned"] is True
+
+
+def test_reviewed_scanner_proposal_applies_without_translation_and_is_idempotent(tmp_path: Path) -> None:
+    wiki, _capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture, proposal = _scan_fixture_proposal(repository)
+    approval = _scanner_approval(proposal)
+
+    with factory() as session:
+        applied = apply_reviewed_capture(session, repository, proposal, approval, apply=True)
+        rerun = apply_reviewed_capture(session, repository, proposal, approval, apply=True)
+
+        task = session.scalar(select(Task).where(Task.wiki_id == applied["task_wiki_id"]))
+        assert task is not None
+        assert task.title == proposal["title"]
+        assert task.priority == proposal["priority"]
+        assert task.due_date == date.fromisoformat(str(proposal["due"]))
+        assert task.owner_type == "inbox"
+        assert rerun == {"status": "unchanged", "capture_id": proposal["capture_id"], "task_wiki_id": task.wiki_id}
+    assert capture.read_text(encoding="utf-8").count("capture-receipt: cap-2026-08-23-scanned") == 1
+
+
+def test_reviewed_scanner_proposal_rejects_stale_or_rebound_envelopes_before_source_mutation(tmp_path: Path) -> None:
+    wiki, _capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture, proposal = _scan_fixture_proposal(repository)
+    approval = _scanner_approval(proposal)
+    original = capture.read_text(encoding="utf-8")
+
+    rebound = dict(proposal)
+    rebound["target"] = {"type": "project", "id": "prj-other", "path": "01-Projects/other/index.md"}
+    mismatched_approval = _scanner_approval({**proposal, "title": "Unreviewed replacement"})
+    capture.write_text(original.replace("Follow up with supplier", "Changed after review"), encoding="utf-8")
+    changed = capture.read_text(encoding="utf-8")
+    invalid = [
+        (proposal, approval, "source hash"),
+        (rebound, approval, "approval"),
+        (proposal, mismatched_approval, "approval"),
+    ]
+
+    for candidate, candidate_approval, message in invalid:
+        with factory() as session, pytest.raises(CapturePromotionError, match=message):
+            apply_reviewed_capture(session, repository, candidate, candidate_approval, apply=True)
+        assert capture.read_text(encoding="utf-8") == changed
+        assert repository.find_by_id("tsk-capture-cap-2026-08-23-scanned") is None
 
 
 def test_reviewed_capture_apply_preflights_all_invalid_inputs_without_writes(tmp_path: Path) -> None:
@@ -240,6 +319,36 @@ def test_monthly_review_record_uses_stable_month_path(tmp_path: Path) -> None:
         )
 
     assert result["path"] == "01-Projects/LifeOS/lifeos/reviews/monthly-2026-08.md"
+
+
+def test_review_record_consumes_real_scan_and_reconciliation_reports_with_stable_backlinks(tmp_path: Path) -> None:
+    wiki, _capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture, proposal = _scan_fixture_proposal(repository)
+    source_task = repository.write(
+        "task",
+        "Unprojected inbox task",
+        {"id": "tsk-unprojected", "status": "open", "task_list": "Inbox", "owner_type": "inbox"},
+        path="00-Inbox/tasks/unprojected-tsk-unprojected.md",
+    )
+    with factory() as session:
+        scan = scan_daily_captures(repository, daily_root="Daily", start="2026-08-23", end="2026-08-23")
+        reconciliation = reconcile_wiki_projection(session, repository)
+        first = generate_review_record(
+            session, repository, cadence="weekly", period="2026-W34", scan=scan, reconciliation=reconciliation
+        )
+        second = generate_review_record(
+            session, repository, cadence="weekly", period="2026-W34", scan=scan, reconciliation=reconciliation
+        )
+
+    record = (wiki / first["path"]).read_text(encoding="utf-8")
+    assert first == second
+    assert str(proposal["source_path"]) in record
+    assert str(proposal["capture_id"]) in record
+    assert source_task.record_id in record
+    assert "unpromoted_captures" in record
+    assert "reconciliation_exceptions" in record
+    assert capture.read_text(encoding="utf-8").count("capture-receipt:") == 0
 
 
 def test_nonprojected_markdown_write_refuses_symlink_target(tmp_path: Path) -> None:
