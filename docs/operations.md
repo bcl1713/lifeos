@@ -138,13 +138,33 @@ The command exits `0` only when canonical source and projection align. Missing, 
 
 ### Task owner reconciliation
 
-This section records the target operator contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is not available on current `dev`; do not use it until that PR has merged and the running image includes it. Once available, task ownership will be part of the canonical-source contract. New tasks will be created only with `owner_type: project` or `area` plus an `owner_wiki_id` resolving to the same canonical type, or with `owner_type: inbox`, no owner ID, and the `Inbox` task list. The creation path will be deterministic: Project/Area tasks will live under the owning note's sibling `tasks/` directory; Inbox tasks will live under `00-Inbox/tasks/`.
+Task ownership is part of the active canonical-source contract. A Task must be a
+Project/Area task with an `owner_wiki_id` resolving to that same canonical type, or
+an Inbox task with no owner ID and the `Inbox` task list. The creation path is
+deterministic: Project/Area tasks live under the owning note's `tasks/` directory;
+Inbox tasks live beneath `00-Inbox/tasks/`.
 
-After #27 is deployed, `sync_wiki_projection.py --check` will report `invalid_task_owners` when a task declares incomplete ownership, an invalid Inbox combination, a missing owner, or an owner whose canonical type does not match `owner_type`. Every canonical Task lacking both owner fields is invalid unless it is explicit Inbox (`owner_type: inbox`, no owner ID, and `task_list: Inbox`). A writable sync refuses all such invalid records before projection mutation; it does not leave ownerless legacy source records as a discoverable, non-failing compatibility class. Until then, this category is unavailable and operators must continue using the existing reconciliation output.
+`sync_wiki_projection.py --check` reports `invalid_task_owners` for incomplete
+ownership, an invalid Inbox combination, a missing owner, or an owner whose
+canonical type does not match `owner_type`. Every ownerless canonical Task is
+invalid unless it is explicit Inbox. A writable sync refuses these records before
+projection mutation; it does not retain them as discoverable compatibility data.
 
-Google Tasks historical migration explicitly imports each migrated Task with Inbox ownership. If the deterministic Google-source canonical record already exists, the migration preserves that same-source canonical path only to avoid a relocation; it does not preserve or create an ownerless task. For `scripts/canonicalize_legacy_projection.py`, a legacy Task with a Project derives `owner_type: project` and that Project's canonical ID. Without a Project, canonicalization is allowed only for the Inbox task list and writes explicit Inbox ownership; a non-Inbox legacy row without a Project is rejected and must be reconciled before it can become canonical source.
+Google Tasks historical migration imports Tasks with explicit Inbox ownership. If a
+deterministic Google-source canonical record already exists, migration may preserve
+that same-source path only to avoid relocation; it does not preserve or create an
+ownerless task. `scripts/canonicalize_legacy_projection.py` derives a Project owner
+where possible; otherwise it accepts only the Inbox task list and writes explicit
+Inbox ownership.
 
-After #27 and the controlled-relocation implementation in PR [#31](https://github.com/bcl1713/lifeos/pull/31) are deployed, before changing existing task ownership, create version-2 target-bound evidence from the normal wiki and SQLite backups with `scripts/create_relocation_backup_evidence.py`, run `--check`, and follow `docs/task-relocation-operations.md`. Apply and recovery require the resulting `--backup-evidence`: apply rejects a changed current wiki snapshot, while recovery still validates the target-bound evidence and regular hashed artifacts without treating the intentional moved-wiki state as a mismatch. Do not hand-edit `owner_type`, `owner_wiki_id`, or `wiki_path` as a substitute: the implemented ordinary task updates will preserve the existing source path and reject owner reassignment with HTTP `409`. The relocation workflow adds neither an automatic/live migration nor a scheduled/default-profile reconciliation job; no real-wiki apply is authorized unless Brian later provides an explicit gate. Reconciliation remains an explicit normal release, restart, recovery, or operator change-handling step.
+Before changing an existing owner, create version-2 target-bound evidence from
+normal wiki and SQLite backups, run `--check`, and follow
+`docs/task-relocation-operations.md`. Do not hand-edit `owner_type`,
+`owner_wiki_id`, or `wiki_path`: ordinary updates preserve the path and reject owner
+reassignment with HTTP `409`. The relocation workflow creates no automatic/live
+migration or scheduled/default-profile reconciliation job. For direct-task versus
+daily-capture guidance, canonical-source links, and the bounded operational
+alignment prompt, see [`para-task-workflow.md`](para-task-workflow.md).
 
 Rebuild only after verified wiki and SQLite backups:
 

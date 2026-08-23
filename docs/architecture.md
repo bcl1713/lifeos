@@ -78,18 +78,26 @@ of this contract authorizes `/wiki`, `/home/brian/wiki`, a default-profile asset
 real-wiki apply. The full operator contract is in
 `docs/controlled-capture-promotion.md`.
 
-## Planned task ownership and PARA placement
+## PARA task ownership and placement
 
-The following is the authoritative target contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is prospective: it does not describe current `dev` behavior until that PR lands. Once implemented, each newly created canonical Task will have one explicit owner type:
+Every active canonical Task has one explicit owner: `project` with a canonical
+Project `owner_wiki_id`, `area` with a canonical Area `owner_wiki_id`, or `inbox`
+with no owner ID and the `Inbox` task list. The source-first creation path rejects
+any other combination. Project and Area tasks are placed in their owner's `tasks/`
+directory; Inbox tasks are placed in `00-Inbox/tasks/`. The canonical path is kept
+as `wiki_path` and is shown in Today and Tasks. A valid, safe resolved path gets
+an **Open canonical task source** action. When
+`LIFEOS_SILVERBULLET_BASE_URL` is unset, that action uses LifeOS's authenticated
+source rendering; when an operator has verified and configured the base for the
+same canonical wiki, the safe resolved action targets the URL-encoded canonical
+Task destination at that SilverBullet base. Unavailable or unsafe paths remain plain
+text so the task views continue to render.
 
-- `project` with an `owner_wiki_id` that resolves to a canonical Project;
-- `area` with an `owner_wiki_id` that resolves to a canonical Area; or
-- `inbox`, which has no `owner_wiki_id` and is valid only for the `Inbox` task list.
-
-The API will reject a new non-Inbox Task without a Project or Area owner, and will reject an Inbox owner paired with a non-Inbox task list or an owner ID. It will also reject an owner ID that does not resolve to the declared canonical type. These ownership fields will be serialized in canonical task Markdown and retained in the rebuildable Task projection.
-
-Once #27 lands, creation will choose the canonical Markdown path deterministically. A Project or Area task will be a sibling beneath its owner's directory at `<owner-directory>/tasks/<slug>-<tsk-id>.md`; an Inbox task will be at `00-Inbox/tasks/<slug>-<tsk-id>.md`. For example, a task owned by `01-Projects/renovate-kitchen/index.md` will be written beneath `01-Projects/renovate-kitchen/tasks/`. The exact path will be retained as the task's `wiki_path` and shown as its source in the Tasks and Today views.
-
-Once #27 lands, ordinary task edits will preserve the existing canonical path, even when the title changes. Changing `owner_type` or `owner_wiki_id` will deliberately not be an ordinary edit: the API will return `409` and require the separate controlled-relocation workflow from implementation PR [#31](https://github.com/bcl1713/lifeos/pull/31). That workflow is dry-run-first and requires an explicit later Brian gate before any real-wiki `--apply`; its complete operator contract is in `docs/task-relocation-operations.md`. It creates no owner-note backlinks and does not change daily-note promotion behavior. Source navigation remains the existing canonical-source behavior: `wiki_path` identifies the task source, and authenticated `/sources/wiki/...` rendering resolves links from that source; a separate `source_ref` remains task provenance metadata rather than an ownership backlink.
-
-Once #27 lands, every canonical Task must satisfy one of those owner combinations, including legacy source records. A Task that lacks both owner fields is invalid unless it is explicitly Inbox (`owner_type: inbox`, no owner ID, and `task_list: Inbox`); it is not merely discoverable compatibility data. Reconciliation will report it as `invalid_task_owners`, and writable sync will refuse it before projection mutation. Google Tasks historical migration assigns Inbox ownership explicitly; it may retain an existing same-source canonical path only to avoid relocating that record. When canonicalizing a legacy projection, the tooling derives a Project owner when one exists; otherwise it permits only the Inbox combination and rejects non-Inbox rows. Goals and Routines are retired legacy projections; they have no active canonical workflow or scheduler behavior. See [`goals-routines-retirement.md`](goals-routines-retirement.md).
+Ordinary updates preserve the canonical path. Owner changes return HTTP `409` and
+require the dry-run-first controlled-relocation workflow in
+`docs/task-relocation-operations.md`. Reconciliation reports invalid ownership as
+`invalid_task_owners` and writable sync refuses it before projection mutation.
+Daily-capture scanning and approval are separate review inputs, not a competing
+task store or an implicit creation path. The complete user, operator, and bounded
+default-profile alignment contract is in
+[`para-task-workflow.md`](para-task-workflow.md).

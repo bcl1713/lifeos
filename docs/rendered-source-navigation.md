@@ -1,9 +1,11 @@
 # Rendered canonical source navigation
 
-LifeOS presents Projects and Areas as authenticated working views over the
-canonical wiki. Each record includes its canonical root-relative Markdown path
-and an **Open canonical note** action. The path and action identify the durable
-source; they do not create a separate LifeOS copy of the record.
+LifeOS presents Projects, Areas, and their Tasks as authenticated working views over the
+canonical wiki. Project and Area records include their canonical root-relative Markdown path and an
+**Open canonical note** action. Today and Tasks show a Task's source path and, when
+that projected path safely resolves to canonical Markdown, an **Open canonical task
+source** action. These paths and actions identify the durable source; they do not
+create a separate LifeOS copy of a record.
 
 ## Using the rendered source view
 
@@ -40,11 +42,10 @@ visible keyboard-focus indicator, and an exposed expanded/collapsed state. It
 controls the primary-navigation region rather than duplicating destinations.
 
 When the menu is collapsed, its destination list is hidden and the page must not
-have horizontal overflow. When expanded, it exposes every primary destination
-(**Today**, **Projects**, **Areas**, **Tasks**, **Goals**, **Routines**, and
-**Data**) and **Log out**. Each destination and the logout action remains
-keyboard reachable and operable; desktop and tablet navigation retain their
-existing visible-row behavior.
+have horizontal overflow. When expanded, it exposes every primary destination:
+**Today**, **Projects**, **Areas**, **Tasks**, and **Data**, followed by
+**Log out**. Each destination and the logout action remains keyboard reachable and
+operable; desktop and tablet navigation retain their existing visible-row behavior.
 
 The disclosure works with pointer and keyboard input: focus the Menu control and
 use **Enter** or **Space** to change its state. While the menu is open,
@@ -86,8 +87,8 @@ Before rendering, the source route validates that the requested canonical path
 stays within the wiki root and rejects unavailable or symlink-unsafe sources.
 
 The source route itself is authenticated. A direct request without a session is
-rejected. An unavailable canonical source cannot be rendered; the Project or Area
-view shows its diagnostic instead of an **Open canonical note** link.
+rejected. An unavailable canonical source cannot be rendered; Project, Area, and
+Task views show a diagnostic or plain source text instead of an unsafe link.
 
 ## Canonical source guarantees
 
@@ -136,9 +137,10 @@ Project and an Area, confirm the displayed canonical path, and follow the
 canonical-note action. At 320px and
 375px viewport widths, verify the collapsed and expanded Menu states, its
 44-by-44 CSS-pixel target, visible focus, Enter/Space activation, Escape focus
-return, every destination and **Log out**, and the absence of page-level
-horizontal scrolling. Also verify the no-JavaScript fallback leaves the same
-ordinary navigation and logout controls available. For internal navigation,
+return, the exact destinations **Today**, **Projects**, **Areas**, **Tasks**, and
+**Data**, followed by **Log out**, and the absence of page-level horizontal
+scrolling. Also verify the no-JavaScript fallback leaves the same ordinary
+navigation and logout controls available. For internal navigation,
 verify a valid wikilink and relative `.md` link plus a known invalid link
 diagnostic. Continue to run projection reconciliation separately; valid
 navigation is not proof that the projection is aligned with source.
