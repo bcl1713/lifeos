@@ -12,6 +12,8 @@ from lifeos.db import create_engine, create_session_factory
 from lifeos.wiki_store import WikiRepository
 
 _PROTECTED_ROOTS = {Path("/wiki"), Path("/home/brian/wiki")}
+_FIXTURE_MARKER = ".lifeos-fixture"
+_FIXTURE_MARKER_CONTENT = "lifeos-test-fixture-v1\n"
 
 
 def _json_file(path: str) -> dict:
@@ -34,6 +36,9 @@ def main() -> int:
     fixture_root = Path(args.fixture_root).resolve()
     if fixture_root in _PROTECTED_ROOTS:
         parser.error("fixture root must not be a protected production wiki root")
+    marker = fixture_root / _FIXTURE_MARKER
+    if marker.is_symlink() or not marker.is_file() or marker.read_text(encoding="utf-8") != _FIXTURE_MARKER_CONTENT:
+        parser.error("fixture root must contain the expected fixture marker")
     proposal = _json_file(args.proposal_file)
     approval = _json_file(args.approval_file)
     if not args.apply:

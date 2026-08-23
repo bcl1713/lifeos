@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
 
+import lifeos.capture_promotion as capture_promotion
 from lifeos.capture_promotion import (
     CapturePromotionError,
     CapturePromotionReconciliationRequired,
@@ -49,6 +50,8 @@ def _approval(proposal: dict[str, object]) -> dict[str, object]:
 
 def _setup(tmp_path: Path):
     wiki = tmp_path / "fixture-wiki"
+    wiki.mkdir()
+    (wiki / ".lifeos-fixture").write_text("lifeos-test-fixture-v1\n", encoding="utf-8")
     capture = wiki / "00-Daily/2026-08-23.md"
     capture.parent.mkdir(parents=True)
     capture.write_text("# 2026-08-23\n\n- [ ] Follow up with supplier\n", encoding="utf-8")
@@ -137,8 +140,31 @@ def test_reviewed_capture_places_project_target_task_under_owner_path(tmp_path: 
 
     record = repository.find_by_id(result["task_wiki_id"])
     assert record is not None
-    assert record.path.startswith("01-Projects/home-renovation/lifeos/tasks/")
+    assert record.path.startswith("01-Projects/home-renovation/tasks/")
     assert record.fields["capture_promotion"]["target"] == proposal["target"]
+    assert record.fields["owner_type"] == "project"
+    assert record.fields["owner_wiki_id"] == project.record_id
+
+
+def test_reviewed_capture_reports_reconciliation_when_daily_receipt_conflicts_after_task_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wiki, capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    proposal = _proposal(capture)
+    original_create = capture_promotion.create_canonical_task
+
+    def create_then_change_source(*args, **kwargs):
+        task = original_create(*args, **kwargs)
+        capture.write_text("# changed during promotion\n", encoding="utf-8")
+        return task
+
+    monkeypatch.setattr(capture_promotion, "create_canonical_task", create_then_change_source)
+    with factory() as session, pytest.raises(CapturePromotionReconciliationRequired, match="reconciliation"):
+        apply_reviewed_capture(session, repository, proposal, _approval(proposal), apply=True)
+
+    assert repository.find_by_id("tsk-capture-cap-2026-08-23-follow-up") is not None
+    assert "capture-receipt:" not in capture.read_text(encoding="utf-8")
 
 
 def test_reviewed_capture_reports_reconciliation_after_task_source_write_projection_failure(tmp_path: Path) -> None:
@@ -259,3 +285,34 @@ def test_promotion_cli_requires_apply_and_durable_approval_file(tmp_path: Path) 
     assert json.loads(dry_run.stdout)["status"] == "dry_run"
     assert json.loads(applied.stdout)["status"] == "applied"
     assert WikiRepository(wiki).find_by_id("tsk-capture-cap-2026-08-23-follow-up") is not None
+
+
+def test_promotion_cli_refuses_unmarked_fixture_root(tmp_path: Path) -> None:
+    wiki, capture, _factory = _setup(tmp_path)
+    (wiki / ".lifeos-fixture").unlink()
+    proposal_path = tmp_path / "proposal.json"
+    approval_path = tmp_path / "approval.json"
+    proposal = _proposal(capture)
+    proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+    approval_path.write_text(json.dumps(_approval(proposal)), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/promote_capture.py",
+            "--database",
+            f"sqlite:///{tmp_path / 'lifeos.db'}",
+            "--fixture-root",
+            str(wiki),
+            "--proposal-file",
+            str(proposal_path),
+            "--approval-file",
+            str(approval_path),
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "fixture marker" in result.stderr

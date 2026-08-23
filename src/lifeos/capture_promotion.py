@@ -6,7 +6,7 @@ import json
 from calendar import monthrange
 from datetime import date
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from lifeos.domain import Task, TaskList
 from lifeos.task_api import TaskCreate, create_canonical_task
-from lifeos.wiki_store import WikiRepository, render_frontmatter, slugify
+from lifeos.wiki_store import WikiConflictError, WikiRepository, render_frontmatter, slugify
 
 
 class CapturePromotionError(ValueError):
@@ -76,15 +76,21 @@ def _validate_approval(proposal: Mapping[str, Any], approval: Mapping[str, Any] 
     return dict(approval)
 
 
-def _target_path(repository: WikiRepository, target: Mapping[str, Any], task_id: str) -> tuple[str, str]:
+def _target_owner(
+    repository: WikiRepository, target: Mapping[str, Any]
+) -> tuple[str, Literal["project", "area", "inbox"], str | None]:
     owner_id = _required_string(target.get("owner_id"), "target owner")
     task_list = _required_string(target.get("task_list"), "target task list")
     if owner_id == "inbox":
-        return task_list, f"01-Projects/LifeOS/lifeos/tasks/capture-{slugify(task_id)}-{task_id}.md"
+        return task_list, "inbox", None
     owner = repository.find_by_id(owner_id)
-    if owner is None or owner.record_type not in {"project", "area"}:
+    if owner is None:
         raise CapturePromotionError("target owner is not a canonical Project, Area, or Inbox")
-    return task_list, f"{Path(owner.path).parent.as_posix()}/lifeos/tasks/capture-{slugify(task_id)}-{task_id}.md"
+    if owner.record_type == "project":
+        return task_list, "project", owner.record_id
+    if owner.record_type == "area":
+        return task_list, "area", owner.record_id
+    raise CapturePromotionError("target owner is not a canonical Project, Area, or Inbox")
 
 
 def _receipt(capture_id: str, task_wiki_id: str, fingerprint: str) -> str:
@@ -132,7 +138,7 @@ def apply_reviewed_capture(
     actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     if actual_hash != source_hash:
         raise CapturePromotionError("source hash changed since proposal review")
-    task_list_name, canonical_path = _target_path(repository, target, task_wiki_id)
+    task_list_name, owner_type, owner_wiki_id = _target_owner(repository, target)
     task_list = session.scalar(select(TaskList).where(TaskList.name == task_list_name))
     if task_list is None:
         raise CapturePromotionError("target task list does not exist")
@@ -147,10 +153,11 @@ def apply_reviewed_capture(
                 priority=int(task_values.get("priority", 0)),
                 tags=list(task_values.get("tags", [])),
                 source_ref=f"capture:{capture_id}",
+                owner_type=owner_type,
+                owner_wiki_id=owner_wiki_id,
             ),
             "capture-promotion",
             record_id=task_wiki_id,
-            canonical_path=canonical_path,
             canonical_metadata={
                 "capture_promotion": {
                     "capture_id": capture_id,
@@ -170,11 +177,16 @@ def apply_reviewed_capture(
                 "canonical task source was written; reconciliation is required"
             ) from exc
         raise
-    repository.write_markdown(
-        source_path,
-        source_text + _receipt(capture_id, task.wiki_id, fingerprint),
-        expected_hash=source_hash,
-    )
+    try:
+        repository.write_markdown(
+            source_path,
+            source_text + _receipt(capture_id, task.wiki_id, fingerprint),
+            expected_hash=source_hash,
+        )
+    except WikiConflictError as exc:
+        raise CapturePromotionReconciliationRequired(
+            "canonical task source was written; daily capture receipt requires reconciliation"
+        ) from exc
     return {"status": "applied", "capture_id": capture_id, "task_wiki_id": task.wiki_id}
 
 
