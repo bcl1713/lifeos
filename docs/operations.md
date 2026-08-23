@@ -26,9 +26,9 @@ The human password and Jarvis agent token are stored in the Vaultwarden `LifeOS`
 1. The entrypoint prepares the bind-mounted `/data` directory as root.
 2. Alembic upgrades run before Uvicorn.
 3. The application process runs as unprivileged UID/GID `100:101` (`lifeos`).
-4. `/wiki` is the canonical durable authority for Tasks, Projects, Areas, Goals, and Routines; SQLite uses WAL and foreign-key enforcement only as a rebuildable projection, query index, and audit cache.
-5. Domain mutations write Markdown source-first. Updates require `expected_hash`; stale source produces HTTP `409` and no projection commit.
-6. Routine generation runs in the application container with idempotent canonical occurrence keys.
+4. `/wiki` is the canonical durable authority for active Tasks, Projects, and Areas; SQLite uses WAL and foreign-key enforcement only as a rebuildable projection, query index, and audit cache. Retired Goal and Routine projections remain for inventory/report compatibility only.
+5. Active domain mutations write Markdown source-first. Updates require `expected_hash`; stale source produces HTTP `409` and no projection commit.
+6. The scheduler does not generate routine task occurrences. See [Goals and Routines retirement contract](goals-routines-retirement.md) for the authenticated, read-only dry-run inventory and required mapping review.
 7. Startup/release acceptance requires projection reconciliation, not merely a healthy SQLite file or HTTP health response.
 
 ## Canonical source navigation
