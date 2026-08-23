@@ -62,13 +62,34 @@ def render_tasks(request: Request, username: str, session: Session, *, all_tasks
     task_lists = list(session.scalars(select(TaskList).order_by(TaskList.name)))
     repository: WikiRepository | None = session.info.get("wiki_repository")
     task_owners = [] if repository is None else sorted(
-        repository.list_records("project") + repository.list_records("area"), key=lambda record: (record.record_type, record.title)
+        repository.list_records("project") + repository.list_records("area"),
+        key=lambda record: (record.record_type, record.title),
     )
+    task_sources = {}
+    if repository is not None:
+        for task in tasks:
+            if not task.wiki_path:
+                continue
+            try:
+                task_sources[task.id] = resolve_wiki_link(
+                    task.wiki_path,
+                    repository.root,
+                    silverbullet_base_url=os.getenv("LIFEOS_SILVERBULLET_BASE_URL"),
+                )
+            except HTTPException:
+                continue
     template = "tasks.html" if all_tasks else "today.html"
     return templates.TemplateResponse(
         request=request,
         name=template,
-        context={"username": username, "tasks": tasks, "task_lists": task_lists, "task_owners": task_owners, "today": date.today()},
+        context={
+            "username": username,
+            "tasks": tasks,
+            "task_lists": task_lists,
+            "task_owners": task_owners,
+            "task_sources": task_sources,
+            "today": date.today(),
+        },
     )
 
 

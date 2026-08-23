@@ -200,6 +200,55 @@ def test_task_ui_selects_canonical_owners_and_displays_owner_and_source_path(tmp
     assert "Source: 01-Projects/renovate-kitchen/tasks/book-contractor-tsk-book-contractor.md" in rendered
 
 
+def test_task_ui_makes_para_ownership_and_canonical_source_navigation_explicit(tmp_path: Path) -> None:
+    client, _wiki = _client(tmp_path)
+    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
+
+    page = client.get("/")
+
+    assert '<fieldset class="task-owner">' in page.text
+    assert "<legend>Task owner</legend>" in page.text
+    assert "Choose Inbox for untriaged work, or select the canonical Project or Area that owns this task." in page.text
+    assert "Daily-capture proposals are reviewed separately and do not create tasks until approved." in page.text
+    assert f'value="{project["wiki_id"]}"' in page.text
+
+    created = client.post(
+        "/ui/tasks",
+        data={
+            "title": "Book contractor",
+            "task_list_id": "1",
+            "owner_type": "project",
+            "owner_wiki_id": project["wiki_id"],
+        },
+    )
+
+    assert created.status_code == 200
+    rendered = client.get("/").text
+    assert (
+        'href="/sources/wiki/01-Projects/renovate-kitchen/tasks/book-contractor-tsk-book-contractor.md"'
+        in rendered
+    )
+    assert ">Open canonical task source<" in rendered
+
+
+def test_task_views_keep_rendering_when_a_projected_source_path_is_unsafe(tmp_path: Path) -> None:
+    client, _wiki = _client(tmp_path)
+    client.get("/")
+    task = client.post("/api/tasks", json={"title": "Unsafe projection", "task_list_id": 1}).json()
+
+    with client.app.state.session_factory() as session:
+        projected = session.get(Task, task["id"])
+        assert projected is not None
+        projected.wiki_path = "../outside.md"
+        session.commit()
+
+    for path in ("/", "/tasks"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert "Source: ../outside.md" in response.text
+        assert "Open canonical task source" not in response.text
+
+
 def test_projection_round_trip_keeps_owner_and_rejects_invalid_owner_type(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     repository = WikiRepository(wiki)
