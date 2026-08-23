@@ -28,7 +28,8 @@ def main() -> int:
         "--mapping", help="JSON list (or {mappings: [...]}) with exact source and owner IDs, paths, and source hash"
     )
     parser.add_argument("--journal-dir", default="./data/task-relocation-journal")
-    parser.add_argument("--backup-dir", help="required with --apply; must be a verified backup destination")
+    parser.add_argument("--backup-dir", help="required with --apply; per-source backup destination")
+    parser.add_argument("--backup-evidence", help="verified normal wiki and SQLite backup evidence for this target")
     parser.add_argument("--apply", action="store_true", help="perform a journaled relocation after preflight")
     parser.add_argument(
         "--recover", action="store_true", help="reconcile unfinished journals without accepting new mappings"
@@ -38,6 +39,8 @@ def main() -> int:
         parser.error("--apply requires --mapping")
     if args.apply and not args.backup_dir:
         parser.error("--apply requires --backup-dir")
+    if (args.apply or args.recover) and not args.backup_evidence:
+        parser.error("--apply/--recover requires --backup-evidence")
     if args.recover and args.mapping:
         parser.error("--recover does not accept --mapping")
 
@@ -47,7 +50,15 @@ def main() -> int:
     repository = WikiRepository(args.wiki_root)
     with factory() as session:
         if args.recover:
-            result = {"recovered": recover_relocations(session, repository, journal_dir=args.journal_dir)}
+            result = {
+                "recovered": recover_relocations(
+                    session,
+                    repository,
+                    journal_dir=args.journal_dir,
+                    backup_evidence=args.backup_evidence,
+                    database_target=args.database,
+                )
+            }
         elif args.mapping:
             result = relocate_tasks(
                 session,
@@ -56,6 +67,8 @@ def main() -> int:
                 journal_dir=args.journal_dir,
                 apply=args.apply,
                 backup_dir=args.backup_dir,
+                backup_evidence=args.backup_evidence,
+                database_target=args.database,
             )
         else:
             result = inventory_task_ownership(repository)
