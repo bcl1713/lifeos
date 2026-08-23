@@ -8,9 +8,9 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 
 - `/healthz` is public.
 - `/auth/login`, `/auth/logout`, `/auth/me`, and agent bearer authentication are available.
-- Tasks, Projects, Areas, Goals, and Routines are canonical Markdown records in `/home/brian/wiki`.
-- LifeOS APIs and browser workflows write canonical Markdown source-first, then refresh rebuildable SQLite projections used for querying, scheduling, and display.
-- Active routines generate idempotent concrete Task occurrences through the in-container scheduler, using `America/Chicago` by default; generated occurrences are also canonical wiki records.
+- Tasks, Projects, and Areas are active canonical Markdown records in `/home/brian/wiki`.
+- LifeOS APIs and browser workflows write active canonical Markdown source-first, then refresh rebuildable SQLite projections used for querying and display.
+- Goals and Routines are retired legacy projections retained only for dry-run inventory/report compatibility; they are not active canonical workflow domains, and the scheduler does not generate their task occurrences. See [`docs/goals-routines-retirement.md`](docs/goals-routines-retirement.md).
 
 - Source repository: `bcl1713/lifeos`
 - Deployment repository: `bcl1713/homelab-stacks`
@@ -27,7 +27,7 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 - Phase 10 test validation: `python scripts/validate_phase10_tests.py .` checks the required focused test matrix, recovery artifacts, and source secret hygiene.
 - Whole-project intent validation: `python scripts/validate_project_intent.py .` checks promised deliverables and current operator documentation against the stated LifeOS intent.
 - Wiki-backed portal architecture: `docs/architecture.md` and `docs/plans/2026-08-12-wiki-backed-portal.md` define the canonical Markdown contract, bidirectional LifeOS/wiki editing model, staged reconciliation, and cutover verification. LifeOS is not a second writable knowledge base.
-- Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed Task, Project, Area, Goal, and Routine projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, and invalid-link records.
+- Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed active Task, Project, and Area projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, and invalid-link records. Retired Goal/Routine rows are not a writable sync target; see [`docs/goals-routines-retirement.md`](docs/goals-routines-retirement.md).
 - Updates require the caller's last-seen canonical `expected_hash`; an external wiki edit produces HTTP `409` rather than a silent overwrite.
 
 ## Local development
@@ -48,7 +48,7 @@ Releases use semantic-version tags in the form `vMAJOR.MINOR.PATCH`. A tag such 
 
 ## Boundaries
 
-- `/home/brian/wiki` is the canonical durable authority for Task, Project, Area, Goal, and Routine identity, relationships, lifecycle state, recurrence identity, and completion state.
+- `/home/brian/wiki` is the canonical durable authority for active Task, Project, and Area identity, relationships, lifecycle state, and completion state. Legacy Goal/Routine projections persist only for retirement inventory/report compatibility.
 - SQLite is a disposable, rebuildable projection and audit/query cache. It must never be treated as a second writable domain authority.
 - Every accepted domain mutation is source-first: canonical Markdown succeeds before projection state is committed.
 - Google Tasks is read-only historical data and is not a writer or authority.
