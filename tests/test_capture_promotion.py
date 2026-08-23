@@ -306,7 +306,7 @@ def test_review_record_is_deterministic_backlinked_and_idempotent(tmp_path: Path
     assert "hash_conflicts" in record
 
 
-def test_monthly_review_record_uses_stable_month_path(tmp_path: Path) -> None:
+def test_monthly_review_record_uses_stable_month_path_for_empty_real_reports(tmp_path: Path) -> None:
     wiki, _capture, factory = _setup(tmp_path)
     with factory() as session:
         result = generate_review_record(
@@ -314,7 +314,7 @@ def test_monthly_review_record_uses_stable_month_path(tmp_path: Path) -> None:
             WikiRepository(wiki),
             cadence="monthly",
             period="2026-08",
-            scan={"unpromoted_captures": [], "inbox": [], "stalled_owners": []},
+            scan={"proposals": [], "exceptions": []},
             reconciliation={"aligned": True},
         )
 
@@ -331,6 +331,11 @@ def test_review_record_consumes_real_scan_and_reconciliation_reports_with_stable
         {"id": "tsk-unprojected", "status": "open", "task_list": "Inbox", "owner_type": "inbox"},
         path="00-Inbox/tasks/unprojected-tsk-unprojected.md",
     )
+    stalled_owner = repository.write("project", "Stalled project", {"id": "prj-stalled", "status": "active"})
+    source_before = {
+        path.relative_to(wiki).as_posix(): path.read_bytes()
+        for path in wiki.rglob("*.md")
+    }
     with factory() as session:
         scan = scan_daily_captures(repository, daily_root="Daily", start="2026-08-23", end="2026-08-23")
         reconciliation = reconcile_wiki_projection(session, repository)
@@ -346,9 +351,18 @@ def test_review_record_consumes_real_scan_and_reconciliation_reports_with_stable
     assert str(proposal["source_path"]) in record
     assert str(proposal["capture_id"]) in record
     assert source_task.record_id in record
+    assert source_task.path in record
+    assert stalled_owner.path in record
     assert "unpromoted_captures" in record
+    assert "inbox_items" in record
+    assert "stalled_or_no_next_action_owners" in record
     assert "reconciliation_exceptions" in record
     assert capture.read_text(encoding="utf-8").count("capture-receipt:") == 0
+    assert {
+        path.relative_to(wiki).as_posix(): path.read_bytes()
+        for path in wiki.rglob("*.md")
+        if path.relative_to(wiki).as_posix() != first["path"]
+    } == source_before
 
 
 def test_nonprojected_markdown_write_refuses_symlink_target(tmp_path: Path) -> None:
