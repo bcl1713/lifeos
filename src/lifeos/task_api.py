@@ -271,6 +271,8 @@ def create_canonical_task(
     audit_action: str = "created",
     initial_status: str = "open",
     expected_hash: str | None = None,
+    canonical_path: str | None = None,
+    canonical_metadata: dict[str, Any] | None = None,
     commit: bool = True,
 ) -> Task:
     task_list = session.get(TaskList, payload.task_list_id)
@@ -307,7 +309,9 @@ def create_canonical_task(
             **related,
             "occurrence_key": occurrence_key,
             "depends_on": [],
+            **(canonical_metadata or {}),
         },
+        path=canonical_path,
         expected_hash=expected_hash,
     )
     task = Task(
