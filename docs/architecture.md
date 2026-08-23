@@ -52,6 +52,15 @@ Tasks—including dependencies, parentage, recurrence/occurrence identity, statu
 
 `scripts/sync_wiki_projection.py --check` is the non-mutating reconciliation gate. It reports missing and orphaned projections, duplicate identities and paths, stale hashes, type/path conflicts, missing identities, and invalid source links. A writable sync must refuse ambiguous canonical identities before mutating SQLite.
 
+## Daily-capture scan boundary
+
+`scripts/scan_daily_captures.py` is a review-only reader of an explicit daily-note
+marker. It returns deterministic proposals and exceptions but creates no Task,
+performs no canonical Markdown or projection write, and does not schedule promotion.
+A human must route an approved proposal through the normal source-first mutation
+contract. The exact grammar, JSON schema, duplicate/source-hash behavior, and
+non-goals are documented in `docs/daily-capture-scan.md`.
+
 ## Planned task ownership and PARA placement
 
 The following is the authoritative target contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is prospective: it does not describe current `dev` behavior until that PR lands. Once implemented, each newly created canonical Task will have one explicit owner type:

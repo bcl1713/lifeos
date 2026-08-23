@@ -88,6 +88,15 @@ All 49 were imported with source markers during the earlier application-authorit
 
 Rollback is documented: restore the read-only Google Tasks export and re-enable the retired path only if cutover verification fails. No routine writes to both systems.
 
+## Daily-capture review scan
+
+The daily-capture scanner is a non-mutating review aid, not a Task-promotion or
+automation job. Its CLI, strict opt-in grammar, deterministic report schema, routing
+decision, duplicate/source-hash handling, and safety boundary are in
+`docs/daily-capture-scan.md`. In particular, it does not write wiki Markdown,
+projections, or journals, and it does not configure cron. A human must approve any
+separate source-first promotion action.
+
 ## Projection reconciliation
 
 Validate the authoritative Project and Area index links separately for each dataset:
