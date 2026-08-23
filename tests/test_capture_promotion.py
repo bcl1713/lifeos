@@ -39,24 +39,25 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _proposal(capture: Path, *, target: dict[str, str] | None = None) -> dict[str, object]:
+def _line_sha256(path: Path, line: int) -> str:
+    return hashlib.sha256(path.read_text(encoding="utf-8").splitlines()[line - 1].encode("utf-8")).hexdigest()
+
+
+def _proposal(capture: Path, *, target: dict[str, object] | None = None) -> dict[str, object]:
     return {
         "capture_id": "cap-2026-08-23-follow-up",
         "source_path": "00-Daily/2026-08-23.md",
-        "source_hash": _sha256(capture),
-        "target": target or {"owner_id": "inbox", "task_list": "Inbox"},
-        "task": {"title": "Follow up with supplier", "notes": "Reviewed capture", "priority": 2, "tags": ["follow-up"]},
+        "source_hash": _line_sha256(capture, 3),
+        "source_line": 3,
+        "title": "Follow up with supplier",
+        "target": target or {"type": "inbox", "id": None, "path": "00-Inbox"},
+        "due": None,
+        "priority": 2,
     }
 
 
 def _approval(proposal: dict[str, object]) -> dict[str, object]:
-    return {
-        "approval_id": "apr-2026-08-23-01",
-        "capture_id": proposal["capture_id"],
-        "source_path": proposal["source_path"],
-        "source_hash": proposal["source_hash"],
-        "target": proposal["target"],
-    }
+    return _scanner_approval(proposal)
 
 
 def _scanner_approval(proposal: dict[str, object]) -> dict[str, object]:
@@ -88,7 +89,12 @@ def _setup(tmp_path: Path):
     (wiki / ".lifeos-fixture").write_text("lifeos-test-fixture-v1\n", encoding="utf-8")
     capture = wiki / "00-Daily/2026-08-23.md"
     capture.parent.mkdir(parents=True)
-    capture.write_text("# 2026-08-23\n\n- [ ] Follow up with supplier\n", encoding="utf-8")
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        "- [ ] [lifeos-capture id=cap-2026-08-23-follow-up target=inbox priority=2] "
+        "Follow up with supplier\n",
+        encoding="utf-8",
+    )
     engine = create_engine(f"sqlite:///{tmp_path / 'lifeos.db'}")
     initialize_database(engine)
     factory = create_session_factory(engine)
@@ -113,7 +119,9 @@ def test_reviewed_capture_apply_writes_one_owner_local_task_and_idempotent_recei
         assert task.wiki_id == "tsk-capture-cap-2026-08-23-follow-up"
         assert task.task_list.name == "Inbox"
         assert task.source_ref == "capture:cap-2026-08-23-follow-up"
-        assert repository.find_by_id(task.wiki_id).fields["capture_promotion"]["approval_id"] == "apr-2026-08-23-01"
+        task_record = repository.find_by_id(task.wiki_id)
+        assert task_record is not None
+        assert task_record.fields["capture_promotion"]["approval_id"] == "apr-2026-08-23-scanner-01"
         assert capture.read_text(encoding="utf-8").count("capture-receipt: cap-2026-08-23-follow-up") == 1
         assert reconcile_wiki_projection(session, repository)["aligned"] is True
 
@@ -193,25 +201,39 @@ def test_reviewed_scanner_proposal_rejects_stale_or_rebound_envelopes_before_sou
         assert repository.find_by_id("tsk-capture-cap-2026-08-23-scanned") is None
 
 
+def test_reviewed_capture_rejects_approved_non_capture_envelope_before_mutation(tmp_path: Path) -> None:
+    wiki, capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture.write_text("# 2026-08-23\n\n- [ ] Unmarked but caller-approved task\n", encoding="utf-8")
+    proposal = _proposal(capture)
+    original = capture.read_text(encoding="utf-8")
+
+    with factory() as session, pytest.raises(CapturePromotionError, match="scanner"):
+        apply_reviewed_capture(session, repository, proposal, _approval(proposal), apply=True)
+
+    assert capture.read_text(encoding="utf-8") == original
+    assert repository.list_records("task") == []
+
+
 def test_reviewed_capture_apply_preflights_all_invalid_inputs_without_writes(tmp_path: Path) -> None:
     wiki, capture, factory = _setup(tmp_path)
     repository = WikiRepository(wiki)
     proposal = _proposal(capture)
     original = capture.read_text(encoding="utf-8")
 
+    invalid_source_hash = _proposal(capture) | {"source_hash": "0" * 64}
+    missing_project = _proposal(
+        capture, target={"type": "project", "id": "prj-missing", "path": "01-Projects/missing/index.md"}
+    )
     invalid = [
-        (_proposal(capture) | {"source_hash": "0" * 64}, _approval(proposal), "source hash"),
+        (invalid_source_hash, _approval(invalid_source_hash), "source hash"),
         (
-            _proposal(capture, target={"owner_id": "inbox", "task_list": "Changed"}),
+            _proposal(capture, target={"type": "inbox", "id": None, "path": "Changed"}),
             _approval(proposal),
-            "approval target",
+            "approval",
         ),
         (proposal, None, "approval"),
-        (
-            _proposal(capture, target={"owner_id": "prj-missing", "task_list": "Inbox"}),
-            _approval(_proposal(capture, target={"owner_id": "prj-missing", "task_list": "Inbox"})),
-            "owner",
-        ),
+        (missing_project, _approval(missing_project), "scanner"),
     ]
     for candidate, approval, message in invalid:
         with factory() as session, pytest.raises(CapturePromotionError, match=message):
@@ -242,7 +264,13 @@ def test_reviewed_capture_places_project_target_task_under_owner_path(tmp_path: 
     wiki, capture, factory = _setup(tmp_path)
     repository = WikiRepository(wiki)
     project = repository.write("project", "Home renovation", {"id": "prj-home", "status": "active"})
-    proposal = _proposal(capture, target={"owner_id": project.record_id, "task_list": "Inbox"})
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        f"- [ ] [lifeos-capture id=cap-2026-08-23-follow-up target=project:{project.record_id} priority=2] "
+        "Follow up with supplier\n",
+        encoding="utf-8",
+    )
+    proposal = scan_daily_captures(repository, daily_root="00-Daily", start="2026-08-23", end="2026-08-23")["proposals"][0]
 
     with factory() as session:
         result = apply_reviewed_capture(session, repository, proposal, _approval(proposal), apply=True)
@@ -410,12 +438,12 @@ def test_nonprojected_markdown_write_refuses_symlink_target(tmp_path: Path) -> N
 
 
 def test_promotion_cli_requires_apply_and_durable_approval_file(tmp_path: Path) -> None:
-    wiki, capture, factory = _setup(tmp_path)
-    proposal = _proposal(capture)
+    wiki, _capture, _factory = _setup(tmp_path)
+    capture, proposal = _scan_fixture_proposal(WikiRepository(wiki))
     proposal_path = tmp_path / "proposal.json"
     approval_path = tmp_path / "approval.json"
     proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
-    approval_path.write_text(json.dumps(_approval(proposal)), encoding="utf-8")
+    approval_path.write_text(json.dumps(_scanner_approval(proposal)), encoding="utf-8")
     database = tmp_path / "lifeos.db"
     command = [
         sys.executable,
@@ -437,7 +465,47 @@ def test_promotion_cli_requires_apply_and_durable_approval_file(tmp_path: Path) 
 
     assert json.loads(dry_run.stdout)["status"] == "dry_run"
     assert json.loads(applied.stdout)["status"] == "applied"
-    assert WikiRepository(wiki).find_by_id("tsk-capture-cap-2026-08-23-follow-up") is not None
+    assert WikiRepository(wiki).find_by_id("tsk-capture-cap-2026-08-23-scanned") is not None
+
+
+def test_promotion_cli_rejects_legacy_ad_hoc_payload_before_mutation(tmp_path: Path) -> None:
+    wiki, capture, _factory = _setup(tmp_path)
+    proposal = {
+        "capture_id": "cap-2026-08-23-legacy",
+        "source_path": "00-Daily/2026-08-23.md",
+        "source_hash": _sha256(capture),
+        "target": {"owner_id": "inbox", "task_list": "Inbox"},
+        "task": {"title": "Legacy ad hoc task"},
+    }
+    proposal_path = tmp_path / "proposal.json"
+    approval_path = tmp_path / "approval.json"
+    proposal_path.write_text(json.dumps(proposal), encoding="utf-8")
+    approval_path.write_text(json.dumps(_scanner_approval(proposal)), encoding="utf-8")
+    source_before = capture.read_text(encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/promote_capture.py",
+            "--database",
+            f"sqlite:///{tmp_path / 'lifeos.db'}",
+            "--fixture-root",
+            str(wiki),
+            "--proposal-file",
+            str(proposal_path),
+            "--approval-file",
+            str(approval_path),
+            "--apply",
+        ],
+        cwd=Path(__file__).parents[1],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "source line" in result.stderr
+    assert capture.read_text(encoding="utf-8") == source_before
+    assert WikiRepository(wiki).list_records("task") == []
 
 
 def test_promotion_cli_refuses_unmarked_fixture_root(tmp_path: Path) -> None:
