@@ -99,12 +99,15 @@ separate source-first promotion action.
 
 ### Fixture-only controlled promotion candidate
 
-The reviewed implementation candidate in [PR #38](https://github.com/bcl1713/lifeos/pull/38)
+The reviewed implementation candidate in [PR #38](https://github.com/bcl1713/lifeos/pull/38),
+with scanner-only apply enforcement in [PR #40](https://github.com/bcl1713/lifeos/pull/40),
 has a separate operator contract in `docs/controlled-capture-promotion.md`. It accepts
 only the scanner's unmodified reviewed proposal with a matching durable approval ID and
-exact payload fingerprint, and requires an explicit `--apply`. It may be exercised
-only against a root bearing the exact non-symlink `.lifeos-fixture` marker; it refuses
-`/wiki`, `/home/brian/wiki`, missing/invalid markers, and unsafe source paths.
+exact payload fingerprint, and requires an explicit `--apply`. It rejects arbitrary
+JSON, an ad hoc `task`, and a legacy `{owner_id, task_list}` target before mutation.
+It may be exercised only against a root bearing the exact non-symlink
+`.lifeos-fixture` marker; it refuses `/wiki`, `/home/brian/wiki`, missing/invalid
+markers, and unsafe source paths.
 
 Do not run that command against a real wiki or a default-profile asset. A canonical
 task write followed by an incomplete receipt or projection is reconciliation required,

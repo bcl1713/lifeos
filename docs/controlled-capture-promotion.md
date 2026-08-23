@@ -1,8 +1,10 @@
 # Controlled capture promotion operator contract
 
 This contract describes the reviewed, fixture-only controlled-promotion candidate in
-[PR #38](https://github.com/bcl1713/lifeos/pull/38). It becomes available only after
-that implementation is merged into `dev` and included in the image being exercised.
+[PR #38](https://github.com/bcl1713/lifeos/pull/38), with scanner-only apply
+enforcement in [PR #40](https://github.com/bcl1713/lifeos/pull/40). It becomes
+available only after the required implementation is merged into `dev` and included in
+the image being exercised.
 It is not authorization to apply against a real wiki, production, `/home/brian/wiki`,
 `/wiki`, or any default-profile asset. A real-wiki promotion remains a separate Brian
 named-target, reviewed-proposal/mapping, backup, and maintenance-window gate.
@@ -11,8 +13,9 @@ named-target, reviewed-proposal/mapping, backup, and maintenance-window gate.
 
 `scripts/scan_daily_captures.py` remains a read-only proposal generator. Promotion
 accepts one **unmodified reviewed scanner proposal** plus one durable approval record,
-then only when `--apply` is explicit. It does not translate a proposal into an ad hoc
-`task` or `{owner_id, task_list}` payload.
+then only when `--apply` is explicit. The CLI does not accept arbitrary JSON, an ad
+hoc `task`, or a legacy `{owner_id, task_list}` target. It does not translate either
+legacy shape into a scanner proposal.
 
 The scanner proposal is the identity-bearing input:
 
@@ -29,9 +32,10 @@ The scanner proposal is the identity-bearing input:
 
 Before any canonical write, promotion verifies the exact-line hash, source path and
 line, the current canonical target identity, task-list availability, and that the
-capture-derived task identity is unclaimed. A stale line/hash, changed or invalid
-target, duplicate task identity, missing approval, or approval/payload mismatch fails
-before writes.
+capture-derived task identity is unclaimed. Missing scanner provenance, an invalid
+scanner target, a stale line/hash, a changed target, duplicate task identity, missing
+approval, or approval/payload mismatch fails before writes. Invalid or non-scanner
+input must never be retried as an arbitrary task payload.
 
 ## Durable approval binding
 
@@ -80,8 +84,10 @@ root; absolute paths, traversal, symlink traversal, and missing source files are
 rejected. These are fail-closed test-fixture checks, not a way to bless another wiki.
 No real-wiki/default-profile use is authorized.
 
-After preparing a fixture database, the reviewed proposal JSON, and the matching
-approval JSON, perform the dry run first:
+After preparing a fixture database, the reviewed scanner proposal JSON, and the
+matching durable approval JSON, perform the dry run first. Do not hand-author a
+replacement proposal for this command: retain the scanner fields and target exactly as
+reviewed.
 
 ```bash
 uv run python scripts/promote_capture.py \
