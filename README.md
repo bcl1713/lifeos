@@ -8,9 +8,9 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 
 - `/healthz` is public.
 - `/auth/login`, `/auth/logout`, `/auth/me`, and agent bearer authentication are available.
-- Tasks, Projects, Areas, Goals, and Routines are canonical Markdown records in `/home/brian/wiki`.
-- LifeOS APIs and browser workflows write canonical Markdown source-first, then refresh rebuildable SQLite projections used for querying, scheduling, and display.
-- Active routines generate idempotent concrete Task occurrences through the in-container scheduler, using `America/Chicago` by default; generated occurrences are also canonical wiki records.
+- Tasks, Projects, and Areas are active canonical Markdown records in `/home/brian/wiki`.
+- LifeOS APIs and browser workflows write active canonical Markdown source-first, then refresh rebuildable SQLite projections used for querying and display.
+- Goals and Routines are retired legacy projections retained only for dry-run inventory/report compatibility; they are not active canonical workflow domains, and the scheduler does not generate their task occurrences. See [`docs/goals-routines-retirement.md`](docs/goals-routines-retirement.md).
 
 - Source repository: `bcl1713/lifeos`
 - Deployment repository: `bcl1713/homelab-stacks`
@@ -30,7 +30,7 @@ Authenticated portal and workflow interface over the canonical LifeOS wiki.
 - Rendered canonical source navigation: `docs/rendered-source-navigation.md` documents the authenticated Project/Area source affordance, safe in-wiki navigation, and optional SilverBullet canonical-link configuration.
 - Daily-capture scan: `docs/daily-capture-scan.md` defines the exact opt-in daily-note grammar and deterministic, review-only JSON report. The scan never mutates canonical Markdown or creates/promotes Tasks.
 - Controlled capture promotion: `docs/controlled-capture-promotion.md` defines the reviewed scanner-proposal/approval binding, fixture-only apply guard, provenance receipt, reconciliation result, and deterministic review-record contract for implementation PR [#38](https://github.com/bcl1713/lifeos/pull/38). It authorizes no real-wiki or default-profile use.
-- Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed Task, Project, Area, Goal, and Routine projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, invalid-link, and `invalid_task_owners` records.
+- Wiki projection sync: `python scripts/sync_wiki_projection.py --database sqlite:///./data/lifeos.db --wiki-root /wiki` rebuilds typed active Task, Project, and Area projections from canonical wiki Markdown. Add `--check` for non-mutating reconciliation of missing, orphaned, duplicate, stale-hash, type/path-conflict, invalid-link, and `invalid_task_owners` records. Retired Goal/Routine rows are not a writable sync target; see [`docs/goals-routines-retirement.md`](docs/goals-routines-retirement.md).
 - Updates require the caller's last-seen canonical `expected_hash`; an external wiki edit produces HTTP `409` rather than a silent overwrite.
 - Planned PARA task ownership (implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27), not yet in `dev`): once that PR lands, every canonical Task must use an explicit Project or Area owner with its canonical wiki ID, or the sole ownerless exception: Inbox (`owner_type: inbox`, no owner ID, `task_list: Inbox`). Reconciliation and writable sync fail closed for any other ownerless or invalid combination. Canonical task placement will then be deterministic under the owner’s `tasks/` directory or `00-Inbox/tasks/`. Relocation is a separate, dry-run-first controlled workflow delivered by PR [#31](https://github.com/bcl1713/lifeos/pull/31). Its apply and recovery paths require version-2 target-bound `--backup-evidence` made from regular hashed wiki and SQLite backups; apply rejects a changed current wiki snapshot, while recovery keeps artifact validation but permits the intentional post-move snapshot. No real-wiki apply is authorized unless Brian later explicitly gates it. See `docs/architecture.md`, `docs/operations.md`, and `docs/task-relocation-operations.md`.
 
@@ -58,7 +58,7 @@ Run `python scripts/validate_release_policy.py --repository .` to check the rele
 
 ## Boundaries
 
-- `/home/brian/wiki` is the canonical durable authority for Task, Project, Area, Goal, and Routine identity, relationships, lifecycle state, recurrence identity, and completion state.
+- `/home/brian/wiki` is the canonical durable authority for active Task, Project, and Area identity, relationships, lifecycle state, and completion state. Legacy Goal/Routine projections persist only for retirement inventory/report compatibility.
 - SQLite is a disposable, rebuildable projection and audit/query cache. It must never be treated as a second writable domain authority.
 - Every accepted domain mutation is source-first: canonical Markdown succeeds before projection state is committed.
 - Google Tasks is read-only historical data and is not a writer or authority.
