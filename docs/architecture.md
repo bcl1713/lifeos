@@ -61,6 +61,23 @@ A human must route an approved proposal through the normal source-first mutation
 contract. The exact grammar, JSON schema, duplicate/source-hash behavior, and
 non-goals are documented in `docs/daily-capture-scan.md`.
 
+## Controlled capture-promotion boundary
+
+Implementation PR [#38](https://github.com/bcl1713/lifeos/pull/38) adds a reviewed,
+fixture-only bridge from an unmodified scanner proposal to one owner-local canonical
+Task. Its approval binds the complete scanner payload and canonical JSON fingerprint;
+the exact scanner line hash and `{type, id, path}` target identity are revalidated
+before any source write. The source-first task write is followed by an idempotent
+daily-capture receipt. If projection or receipt work cannot complete after the source
+write, the result is reconciliation required rather than a claimed rollback.
+
+The same candidate produces deterministic canonical weekly/monthly review records with
+source backlinks for scan, task, owner, and recognized reconciliation evidence. Its
+fixture-root marker requirement is a test-only guard: no current or future invocation
+of this contract authorizes `/wiki`, `/home/brian/wiki`, a default-profile asset, or a
+real-wiki apply. The full operator contract is in
+`docs/controlled-capture-promotion.md`.
+
 ## Planned task ownership and PARA placement
 
 The following is the authoritative target contract for implementation PR [#27](https://github.com/bcl1713/lifeos/pull/27). It is prospective: it does not describe current `dev` behavior until that PR lands. Once implemented, each newly created canonical Task will have one explicit owner type:

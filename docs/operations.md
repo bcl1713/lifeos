@@ -97,6 +97,20 @@ decision, duplicate/source-hash handling, and safety boundary are in
 projections, or journals, and it does not configure cron. A human must approve any
 separate source-first promotion action.
 
+### Fixture-only controlled promotion candidate
+
+The reviewed implementation candidate in [PR #38](https://github.com/bcl1713/lifeos/pull/38)
+has a separate operator contract in `docs/controlled-capture-promotion.md`. It accepts
+only the scanner's unmodified reviewed proposal with a matching durable approval ID and
+exact payload fingerprint, and requires an explicit `--apply`. It may be exercised
+only against a root bearing the exact non-symlink `.lifeos-fixture` marker; it refuses
+`/wiki`, `/home/brian/wiki`, missing/invalid markers, and unsafe source paths.
+
+Do not run that command against a real wiki or a default-profile asset. A canonical
+task write followed by an incomplete receipt or projection is reconciliation required,
+not a rollback. The candidate also creates deterministic weekly/monthly fixture review
+records with source backlinks; it creates no cron/default-profile handoff.
+
 ## Projection reconciliation
 
 Validate the authoritative Project and Area index links separately for each dataset:
