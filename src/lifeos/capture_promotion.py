@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from lifeos.domain import Task, TaskList
 from lifeos.task_api import TaskCreate, create_canonical_task
-from lifeos.wiki_store import WikiConflictError, WikiRepository, render_frontmatter, slugify
+from lifeos.wiki_store import WikiConflictError, WikiRecord, WikiRepository, render_frontmatter, slugify
 
 
 class CapturePromotionError(ValueError):
@@ -272,6 +272,50 @@ def _period_end(cadence: str, period: str) -> date:
     raise CapturePromotionError("cadence must be weekly or monthly")
 
 
+_RECONCILIATION_EXCEPTION_KEYS = {
+    "authority_conflicts",
+    "duplicate_projection_ids",
+    "duplicate_projection_paths",
+    "duplicate_source_ids",
+    "hash_conflicts",
+    "invalid_links",
+    "invalid_task_owners",
+    "missing_identity",
+    "missing_projection",
+    "orphaned_projection",
+    "path_conflicts",
+    "shadowed_archive_ids",
+    "type_conflicts",
+    "unresolved_relationships",
+}
+
+
+def _record_backlink(record: WikiRecord) -> dict[str, str]:
+    return {"wiki_id": record.record_id, "source_path": record.path, "title": record.title}
+
+
+def _reconciliation_backlinks(value: Any, records_by_id: Mapping[str, WikiRecord]) -> Any:
+    if isinstance(value, str):
+        record = records_by_id.get(value)
+        return _record_backlink(record) if record is not None else value
+    if isinstance(value, list):
+        return [_reconciliation_backlinks(item, records_by_id) for item in value]
+    if isinstance(value, Mapping):
+        result = {str(key): _reconciliation_backlinks(item, records_by_id) for key, item in value.items()}
+        record_id = result.get("id")
+        if isinstance(record_id, str) and (record := records_by_id.get(record_id)) is not None:
+            result.setdefault("source_path", record.path)
+        return result
+    return value
+
+
+def _review_source_records(repository: WikiRepository) -> list[WikiRecord]:
+    try:
+        return repository.authoritative_records()
+    except ValueError:
+        return repository.list_records()
+
+
 def generate_review_record(
     session: Session,
     repository: WikiRepository,
@@ -283,26 +327,65 @@ def generate_review_record(
 ) -> dict[str, str]:
     """Render an idempotent canonical review document from scan and projection state."""
     period_end = _period_end(cadence, period)
+    records = _review_source_records(repository)
+    records_by_id = {record.record_id: record for record in records}
+    inbox = [
+        _record_backlink(record)
+        for record in records
+        if record.record_type == "task"
+        and record.fields.get("status", "open") == "open"
+        and record.fields.get("owner_type") == "inbox"
+        and record.fields.get("task_list") == "Inbox"
+    ]
+    owner_records = [
+        record
+        for record in records
+        if record.record_type in {"project", "area"} and record.fields.get("status", "active") == "active"
+    ]
+    open_owner_ids = {
+        str(record.fields["owner_wiki_id"])
+        for record in records
+        if record.record_type == "task"
+        and record.fields.get("status", "open") == "open"
+        and record.fields.get("owner_wiki_id")
+    }
+    stalled = [
+        {**_record_backlink(record), "reason": "no open next action"}
+        for record in owner_records
+        if record.record_id not in open_owner_ids
+    ]
+    legacy_stalled = scan.get("stalled_owners", [])
+    if not isinstance(legacy_stalled, list):
+        raise CapturePromotionError("scan stalled owners must be a list")
     due = [
-        {"wiki_id": task.wiki_id, "due_date": task.due_date.isoformat()}
+        {
+            "wiki_id": task.wiki_id,
+            "source_path": task.wiki_path,
+            "title": task.title,
+            "due_date": task.due_date.isoformat(),
+        }
         for task in session.scalars(select(Task).where(Task.status == "open", Task.due_date.is_not(None)))
         if task.due_date and task.due_date <= period_end
     ]
+    proposals = scan.get("proposals", scan.get("unpromoted_captures", []))
+    if not isinstance(proposals, list):
+        raise CapturePromotionError("scan proposals must be a list")
     evidence = {
-        "unpromoted_captures": sorted(scan.get("unpromoted_captures", []), key=_canonical_json),
-        "inbox": sorted(scan.get("inbox", [])),
+        "unpromoted_captures": sorted(proposals, key=_canonical_json),
+        "inbox_items": sorted(inbox, key=_canonical_json),
         "overdue_or_due_next": sorted(due, key=_canonical_json),
-        "stalled_owners": sorted(scan.get("stalled_owners", []), key=_canonical_json),
+        "stalled_or_no_next_action_owners": sorted([*stalled, *legacy_stalled], key=_canonical_json),
         "reconciliation_exceptions": {
-            key: reconciliation[key]
+            key: _reconciliation_backlinks(reconciliation[key], records_by_id)
             for key in sorted(reconciliation)
-            if key != "aligned" and reconciliation[key]
+            if key in _RECONCILIATION_EXCEPTION_KEYS and reconciliation[key]
         },
     }
     path = f"01-Projects/LifeOS/lifeos/reviews/{cadence}-{period.lower()}.md"
     fields = {
         "schema_version": "1",
         "type": "review_record",
+        "id": f"review-{cadence}-{period.lower()}",
         "cadence": cadence,
         "period": period,
         "source_backlinks": evidence,
