@@ -1,7 +1,7 @@
 import os
 from datetime import date
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -53,13 +53,30 @@ def ensure_default_list(session: Session) -> TaskList:
     return item
 
 
-def render_tasks(request: Request, username: str, session: Session, *, all_tasks: bool = False) -> HTMLResponse:
+def render_tasks(
+    request: Request,
+    username: str,
+    session: Session,
+    *,
+    all_tasks: bool = False,
+    task_form: dict[str, str] | None = None,
+    task_form_error: str | None = None,
+    status_code: int = status.HTTP_200_OK,
+) -> HTMLResponse:
     ensure_default_list(session)
     query = select(Task).order_by(Task.due_date.is_(None), Task.due_date, Task.id)
     if not all_tasks:
         query = query.where(Task.status == "open")
     tasks = list(session.scalars(query))
     task_lists = list(session.scalars(select(TaskList).order_by(TaskList.name)))
+    if task_form is None:
+        task_form = {
+            "title": "",
+            "task_list_id": str(task_lists[0].id),
+            "notes": "",
+            "due_date": "",
+            "task_owner": "inbox",
+        }
     repository: WikiRepository | None = session.info.get("wiki_repository")
     task_owners = [] if repository is None else sorted(
         repository.list_records("project") + repository.list_records("area"),
@@ -88,8 +105,11 @@ def render_tasks(request: Request, username: str, session: Session, *, all_tasks
             "task_lists": task_lists,
             "task_owners": task_owners,
             "task_sources": task_sources,
+            "task_form": task_form,
+            "task_form_error": task_form_error,
             "today": date.today(),
         },
+        status_code=status_code,
     )
 
 
@@ -152,26 +172,53 @@ def create_ui_task(
     task_list_id: int = Form(...),
     notes: str = Form(default=""),
     due_date: str = Form(default=""),
-    owner_type: Literal["project", "area", "inbox"] = Form(default="inbox"),
-    owner_wiki_id: str = Form(default=""),
+    task_owner: str = Form(default="inbox"),
     username: str = Depends(require_user),
     session: Session = Depends(get_session),
-) -> RedirectResponse:
+) -> Response:
     if session.get(TaskList, task_list_id) is None:
         raise HTTPException(status_code=404, detail="Task list not found")
     parsed_due_date = date.fromisoformat(due_date) if due_date else None
-    create_task(
-        TaskCreate(
-            title=title.strip(),
-            notes=notes.strip() or None,
-            due_date=parsed_due_date,
-            task_list_id=task_list_id,
-            owner_type=owner_type,
-            owner_wiki_id=owner_wiki_id or None,
-        ),
-        actor=username,
-        session=session,
-    )
+    selected_type, separator, selected_owner_wiki_id = task_owner.partition(":")
+    owner_type: Literal["project", "area", "inbox"] | None
+    owner_wiki_id: str | None
+    if task_owner == "inbox":
+        owner_type, owner_wiki_id = "inbox", None
+    elif separator != ":" or selected_type not in {"project", "area"} or not selected_owner_wiki_id:
+        owner_type, owner_wiki_id = None, None
+    else:
+        owner_type = cast(Literal["project", "area"], selected_type)
+        owner_wiki_id = selected_owner_wiki_id
+    try:
+        create_task(
+            TaskCreate(
+                title=title.strip(),
+                notes=notes.strip() or None,
+                due_date=parsed_due_date,
+                task_list_id=task_list_id,
+                owner_type=owner_type,
+                owner_wiki_id=owner_wiki_id,
+            ),
+            actor=username,
+            session=session,
+        )
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_422_UNPROCESSABLE_CONTENT:
+            raise
+        return render_tasks(
+            request,
+            username,
+            session,
+            task_form={
+                "title": title,
+                "task_list_id": str(task_list_id),
+                "notes": notes,
+                "due_date": due_date,
+                "task_owner": task_owner,
+            },
+            task_form_error="We could not match that owner. Choose a Project or Area from the Task owner list and try again.",
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        )
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)
 
 
