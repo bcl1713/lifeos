@@ -126,6 +126,8 @@ def _scanner_task_values(proposal: Mapping[str, Any]) -> dict[str, Any]:
         except ValueError as exc:
             raise CapturePromotionError("task due must use YYYY-MM-DD") from exc
     priority = proposal.get("priority")
+    if priority is None:
+        priority = 0
     if not isinstance(priority, int) or isinstance(priority, bool) or priority not in range(4):
         raise CapturePromotionError("task priority must be between 0 and 3")
     return {"title": _required_string(proposal.get("title"), "task title"), "due_date": due, "priority": priority}

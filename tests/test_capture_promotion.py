@@ -138,6 +138,36 @@ def test_reviewed_scanner_proposal_applies_without_translation_and_is_idempotent
     assert capture.read_text(encoding="utf-8").count("capture-receipt: cap-2026-08-23-scanned") == 1
 
 
+def test_reviewed_scanner_proposal_without_due_or_priority_applies_without_translation(tmp_path: Path) -> None:
+    wiki, _capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture = repository.root / "Daily/2026-08-23.md"
+    capture.parent.mkdir(parents=True, exist_ok=True)
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        "- [ ] [lifeos-capture id=cap-no-priority target=inbox] No priority supplied\n",
+        encoding="utf-8",
+    )
+    scan = scan_daily_captures(repository, daily_root="Daily", start="2026-08-23", end="2026-08-23")
+    assert scan["exceptions"] == []
+    proposal = scan["proposals"][0]
+    assert proposal["due"] is None
+    assert proposal["priority"] is None
+    approval = _scanner_approval(proposal)
+
+    with factory() as session:
+        applied = apply_reviewed_capture(session, repository, proposal, approval, apply=True)
+        rerun = apply_reviewed_capture(session, repository, proposal, approval, apply=True)
+
+        task = session.scalar(select(Task).where(Task.wiki_id == applied["task_wiki_id"]))
+        assert task is not None
+        assert task.title == "No priority supplied"
+        assert task.priority == 0
+        assert task.due_date is None
+        assert rerun == {"status": "unchanged", "capture_id": proposal["capture_id"], "task_wiki_id": task.wiki_id}
+    assert capture.read_text(encoding="utf-8").count("capture-receipt: cap-no-priority") == 1
+
+
 def test_reviewed_scanner_proposal_rejects_stale_or_rebound_envelopes_before_source_mutation(tmp_path: Path) -> None:
     wiki, _capture, factory = _setup(tmp_path)
     repository = WikiRepository(wiki)
