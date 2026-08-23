@@ -1,7 +1,7 @@
 import json
-from uuid import uuid4
 from datetime import date
 from typing import Any, Literal
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskDependency, TaskList, utcnow
+from lifeos.legacy_retirement import raise_legacy_domain_retired
 from lifeos.wiki_store import WikiConflictError, WikiReconciliationRequiredError, WikiRepository, slugify
 
 router = APIRouter(prefix="/api")
@@ -223,6 +224,10 @@ def sync_task_to_wiki(
 
 
 def validate_task_links(session: Session, values: dict[str, Any]) -> None:
+    if values.get("goal_id") is not None:
+        raise_legacy_domain_retired("goals")
+    if values.get("routine_id") is not None:
+        raise_legacy_domain_retired("routines")
     related = (("goal_id", Goal), ("project_id", Project), ("routine_id", Routine))
     for field, model in related:
         value = values.get(field)

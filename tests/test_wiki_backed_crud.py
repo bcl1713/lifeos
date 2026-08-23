@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
-from lifeos.domain import Goal, Project, Routine, Task, TaskList
+from lifeos.domain import Project, Routine, Task, TaskList
 from lifeos.main import create_app
 from lifeos.wiki_store import WikiRepository
 
@@ -229,6 +229,7 @@ def test_task_creation_writes_canonical_source_before_projection(tmp_path: Path,
     assert (wiki / response.json()["wiki_path"]).is_file()
 
 
+@pytest.mark.skip(reason="Goals are retired; retirement coverage lives in test_goals_routines_retirement.py")
 def test_goal_creation_writes_canonical_source_before_projection(tmp_path: Path, monkeypatch) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
@@ -263,6 +264,7 @@ def test_goal_creation_writes_canonical_source_before_projection(tmp_path: Path,
     assert (wiki / response.json()["wiki_path"]).is_file()
 
 
+@pytest.mark.skip(reason="Goal and Routine mutations are retired")
 def test_context_updates_require_current_wiki_hash(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
@@ -299,6 +301,7 @@ def test_context_updates_require_current_wiki_hash(tmp_path: Path) -> None:
         assert updated.json()["wiki_hash"] != resource["wiki_hash"]
 
 
+@pytest.mark.skip(reason="Routine relationships are retired")
 def test_project_and_routine_relationship_updates_write_stable_canonical_fields(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
@@ -383,6 +386,7 @@ def test_project_update_never_adopts_same_title_canonical_identity(tmp_path: Pat
         assert projected.status == "active"
 
 
+@pytest.mark.skip(reason="Routine creation is retired")
 def test_project_and_routine_creation_write_source_before_projection(tmp_path: Path, monkeypatch) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
@@ -431,6 +435,7 @@ def test_project_and_routine_creation_write_source_before_projection(tmp_path: P
     assert routine_events[0] == "source:routine"
 
 
+@pytest.mark.skip(reason="Goal milestones and routine skips are retired")
 def test_milestone_and_skip_write_parent_source_before_child_projection(tmp_path: Path, monkeypatch) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'nested-source-first.db'}",
@@ -490,6 +495,7 @@ def test_milestone_and_skip_write_parent_source_before_child_projection(tmp_path
     assert skip_events[0] == "source:routine"
 
 
+@pytest.mark.skip(reason="Goal and Routine updates are retired")
 def test_domain_updates_write_source_before_projection_flush(tmp_path: Path, monkeypatch) -> None:
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'update-order.db'}",
@@ -611,7 +617,6 @@ def test_task_status_and_dependency_writes_are_source_first(tmp_path: Path, monk
 @pytest.mark.parametrize(
     ("endpoint", "payload", "model", "record_type"),
     [
-        ("/api/goals", {"title": "Projection failure goal"}, Goal, "goal"),
         ("/api/projects", {"title": "Projection failure project"}, Project, "project"),
     ],
 )
@@ -648,6 +653,7 @@ def test_context_create_reports_reconciliation_required_after_source_write(
         assert session.query(model).count() == 0
 
 
+@pytest.mark.skip(reason="Routine creation is retired; task reconciliation is covered separately")
 def test_task_and_routine_create_report_reconciliation_required_after_source_write(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
