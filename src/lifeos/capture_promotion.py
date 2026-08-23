@@ -68,6 +68,12 @@ def _validate_approval(proposal: Mapping[str, Any], approval: Mapping[str, Any] 
     if not isinstance(approval, Mapping):
         raise CapturePromotionError("approval record is required")
     _required_string(approval.get("approval_id"), "approval id")
+    if "source_line" in proposal:
+        if _canonical_json(approval.get("approved_proposal")) != _canonical_json(proposal):
+            raise CapturePromotionError("approval does not match the reviewed scanner proposal")
+        if approval.get("proposal_fingerprint") != _proposal_fingerprint(proposal):
+            raise CapturePromotionError("approval fingerprint does not match the reviewed scanner proposal")
+        return dict(approval)
     for key in ("capture_id", "source_path", "source_hash"):
         if approval.get(key) != proposal.get(key):
             raise CapturePromotionError(f"approval {key.replace('_', ' ')} does not match proposal")
@@ -91,6 +97,47 @@ def _target_owner(
     if owner.record_type == "area":
         return task_list, "area", owner.record_id
     raise CapturePromotionError("target owner is not a canonical Project, Area, or Inbox")
+
+
+def _scanner_target_owner(
+    repository: WikiRepository, target: Mapping[str, Any]
+) -> tuple[str, Literal["project", "area", "inbox"], str | None]:
+    """Bind an unmodified scanner target to the current canonical owner."""
+    target_type = _required_string(target.get("type"), "target type")
+    target_path = _required_string(target.get("path"), "target path")
+    target_id = target.get("id")
+    if target_type == "inbox":
+        if target_id is not None or target_path != "00-Inbox":
+            raise CapturePromotionError("target does not match the canonical Inbox")
+        return "Inbox", "inbox", None
+    if target_type not in {"project", "area"} or not isinstance(target_id, str):
+        raise CapturePromotionError("target does not resolve to a canonical Project or Area")
+    owner = repository.find_by_id(target_id)
+    if owner is None or owner.record_type != target_type or owner.path != target_path:
+        raise CapturePromotionError("target does not match the reviewed canonical owner")
+    return "Inbox", "project" if target_type == "project" else "area", owner.record_id
+
+
+def _scanner_task_values(proposal: Mapping[str, Any]) -> dict[str, Any]:
+    due = proposal.get("due")
+    if due is not None:
+        try:
+            due = date.fromisoformat(_required_string(due, "task due"))
+        except ValueError as exc:
+            raise CapturePromotionError("task due must use YYYY-MM-DD") from exc
+    priority = proposal.get("priority")
+    if not isinstance(priority, int) or isinstance(priority, bool) or priority not in range(4):
+        raise CapturePromotionError("task priority must be between 0 and 3")
+    return {"title": _required_string(proposal.get("title"), "task title"), "due_date": due, "priority": priority}
+
+
+def _scanner_source_hash(source_text: str, source_line: Any) -> str:
+    if not isinstance(source_line, int) or isinstance(source_line, bool) or source_line < 1:
+        raise CapturePromotionError("source line is required")
+    lines = source_text.splitlines()
+    if source_line > len(lines):
+        raise CapturePromotionError("source line is outside the daily note")
+    return hashlib.sha256(lines[source_line - 1].encode("utf-8")).hexdigest()
 
 
 def _receipt(capture_id: str, task_wiki_id: str, fingerprint: str) -> str:
@@ -120,14 +167,25 @@ def apply_reviewed_capture(
     if len(source_hash) != 64 or any(character not in "0123456789abcdef" for character in source_hash):
         raise CapturePromotionError("source hash must be a SHA-256 hex digest")
     target = proposal.get("target")
-    task_values = proposal.get("task")
-    if not isinstance(target, Mapping) or not isinstance(task_values, Mapping):
-        raise CapturePromotionError("target and task are required")
+    if not isinstance(target, Mapping):
+        raise CapturePromotionError("target is required")
     approval_record = _validate_approval(proposal, approval)
     source = _source_file(repository, source_path)
     fingerprint = _proposal_fingerprint(proposal)
     task_wiki_id = f"tsk-capture-{slugify(capture_id)}"
-    source_text = source.read_text(encoding="utf-8")
+    source_bytes = source.read_bytes()
+    source_text = source_bytes.decode("utf-8")
+    scanner_proposal = "source_line" in proposal
+    if scanner_proposal:
+        task_values = _scanner_task_values(proposal)
+        actual_hash = _scanner_source_hash(source_text, proposal["source_line"])
+        task_list_name, owner_type, owner_wiki_id = _scanner_target_owner(repository, target)
+    else:
+        task_values = proposal.get("task")
+        if not isinstance(task_values, Mapping):
+            raise CapturePromotionError("task is required")
+        actual_hash = hashlib.sha256(source_bytes).hexdigest()
+        task_list_name, owner_type, owner_wiki_id = _target_owner(repository, target)
     existing = repository.find_by_id(task_wiki_id)
     if existing is not None and existing.fields.get("capture_promotion", {}).get("capture_id") == capture_id:
         if _receipt(capture_id, task_wiki_id, fingerprint).strip() in source_text:
@@ -135,10 +193,8 @@ def apply_reviewed_capture(
         raise CapturePromotionError("capture identity exists without a matching receipt")
     if existing is not None:
         raise CapturePromotionError("capture task identity is already owned")
-    actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     if actual_hash != source_hash:
         raise CapturePromotionError("source hash changed since proposal review")
-    task_list_name, owner_type, owner_wiki_id = _target_owner(repository, target)
     task_list = session.scalar(select(TaskList).where(TaskList.name == task_list_name))
     if task_list is None:
         raise CapturePromotionError("target task list does not exist")
@@ -153,6 +209,7 @@ def apply_reviewed_capture(
                 priority=int(task_values.get("priority", 0)),
                 tags=list(task_values.get("tags", [])),
                 source_ref=f"capture:{capture_id}",
+                due_date=task_values.get("due_date"),
                 owner_type=owner_type,
                 owner_wiki_id=owner_wiki_id,
             ),
@@ -166,7 +223,16 @@ def apply_reviewed_capture(
                     "target": dict(target),
                     "approval_id": approval_record["approval_id"],
                     "proposal_fingerprint": fingerprint,
-                }
+                },
+                **(
+                    {
+                        "daily_capture_id": capture_id,
+                        "daily_capture_source_hash": source_hash,
+                        "daily_capture_source_path": source_path,
+                    }
+                    if scanner_proposal
+                    else {}
+                ),
             },
             audit_action="capture_promoted",
             audit_payload={"capture_id": capture_id, "approval_id": approval_record["approval_id"]},
@@ -181,7 +247,7 @@ def apply_reviewed_capture(
         repository.write_markdown(
             source_path,
             source_text + _receipt(capture_id, task.wiki_id, fingerprint),
-            expected_hash=source_hash,
+            expected_hash=hashlib.sha256(source_bytes).hexdigest(),
         )
     except WikiConflictError as exc:
         raise CapturePromotionReconciliationRequired(
