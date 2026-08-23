@@ -85,9 +85,13 @@ Project `owner_wiki_id`, `area` with a canonical Area `owner_wiki_id`, or `inbox
 with no owner ID and the `Inbox` task list. The source-first creation path rejects
 any other combination. Project and Area tasks are placed in their owner's `tasks/`
 directory; Inbox tasks are placed in `00-Inbox/tasks/`. The canonical path is kept
-as `wiki_path` and is shown in Today and Tasks. A valid, safe resolved path also
-gets an authenticated **Open canonical task source** link; unavailable or unsafe
-paths remain plain text so the task views continue to render.
+as `wiki_path` and is shown in Today and Tasks. A valid, safe resolved path gets
+an **Open canonical task source** action. When
+`LIFEOS_SILVERBULLET_BASE_URL` is unset, that action uses LifeOS's authenticated
+source rendering; when an operator has verified and configured the base for the
+same canonical wiki, the safe resolved action targets the URL-encoded canonical
+Task destination at that SilverBullet base. Unavailable or unsafe paths remain plain
+text so the task views continue to render.
 
 Ordinary updates preserve the canonical path. Owner changes return HTTP `409` and
 require the dry-run-first controlled-relocation workflow in

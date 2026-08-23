@@ -40,8 +40,11 @@ removed the canonical source.
 
 Today and **Tasks** show each task's owner and source path. When that projected
 path resolves to an available, safe canonical Markdown file, the view also offers
-**Open canonical task source**. The link opens the authenticated LifeOS source view
-for the current canonical Task file.
+**Open canonical task source**. When `LIFEOS_SILVERBULLET_BASE_URL` is unset, the
+link opens the authenticated LifeOS source view for the current canonical Task file.
+When an operator has verified and configured that base for the same canonical wiki,
+the safe resolved action instead targets the URL-encoded canonical Task destination
+at the configured SilverBullet base.
 
 The path is evidence of the durable record, not a second copy in the portal. If a
 projected path is absent, invalid, unsafe, or unavailable, LifeOS leaves the source

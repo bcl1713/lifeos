@@ -42,11 +42,10 @@ visible keyboard-focus indicator, and an exposed expanded/collapsed state. It
 controls the primary-navigation region rather than duplicating destinations.
 
 When the menu is collapsed, its destination list is hidden and the page must not
-have horizontal overflow. When expanded, it exposes every primary destination
-(**Today**, **Projects**, **Areas**, **Tasks**, **Goals**, **Routines**, and
-**Data**) and **Log out**. Each destination and the logout action remains
-keyboard reachable and operable; desktop and tablet navigation retain their
-existing visible-row behavior.
+have horizontal overflow. When expanded, it exposes every primary destination:
+**Today**, **Projects**, **Areas**, **Tasks**, and **Data**, followed by
+**Log out**. Each destination and the logout action remains keyboard reachable and
+operable; desktop and tablet navigation retain their existing visible-row behavior.
 
 The disclosure works with pointer and keyboard input: focus the Menu control and
 use **Enter** or **Space** to change its state. While the menu is open,
@@ -138,9 +137,10 @@ Project and an Area, confirm the displayed canonical path, and follow the
 canonical-note action. At 320px and
 375px viewport widths, verify the collapsed and expanded Menu states, its
 44-by-44 CSS-pixel target, visible focus, Enter/Space activation, Escape focus
-return, every destination and **Log out**, and the absence of page-level
-horizontal scrolling. Also verify the no-JavaScript fallback leaves the same
-ordinary navigation and logout controls available. For internal navigation,
+return, the exact destinations **Today**, **Projects**, **Areas**, **Tasks**, and
+**Data**, followed by **Log out**, and the absence of page-level horizontal
+scrolling. Also verify the no-JavaScript fallback leaves the same ordinary
+navigation and logout controls available. For internal navigation,
 verify a valid wikilink and relative `.md` link plus a known invalid link
 diagnostic. Continue to run projection reconciliation separately; valid
 navigation is not proof that the projection is aligned with source.
