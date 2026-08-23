@@ -1,0 +1,235 @@
+"""Fixture-scoped, explicitly approved capture promotion and review records."""
+from __future__ import annotations
+
+import hashlib
+import json
+from calendar import monthrange
+from datetime import date
+from pathlib import Path
+from typing import Any, Mapping
+
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from lifeos.domain import Task, TaskList
+from lifeos.task_api import TaskCreate, create_canonical_task
+from lifeos.wiki_store import WikiRepository, render_frontmatter, slugify
+
+
+class CapturePromotionError(ValueError):
+    """Raised before any source mutation when a reviewed proposal is invalid."""
+
+
+class CapturePromotionReconciliationRequired(RuntimeError):
+    """A task source write succeeded but its projection did not."""
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _proposal_fingerprint(proposal: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_canonical_json(dict(proposal)).encode("utf-8")).hexdigest()
+
+
+def _source_file(repository: WikiRepository, source_path: str) -> Path:
+    if not source_path.endswith(".md"):
+        raise CapturePromotionError("source path must be Markdown")
+    root = repository.root
+    relative = Path(source_path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise CapturePromotionError("source path escapes wiki root")
+    raw = root / relative
+    for parent in (raw, *raw.parents):
+        if parent == root.parent:
+            break
+        if parent.is_symlink():
+            raise CapturePromotionError("source path must not traverse symlinks")
+        if parent == root:
+            break
+    target = raw.resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise CapturePromotionError("source path escapes wiki root") from exc
+    if not target.is_file():
+        raise CapturePromotionError("source path is missing")
+    return target
+
+
+def _required_string(value: Any, name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise CapturePromotionError(f"{name} is required")
+    return value.strip()
+
+
+def _validate_approval(proposal: Mapping[str, Any], approval: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(approval, Mapping):
+        raise CapturePromotionError("approval record is required")
+    _required_string(approval.get("approval_id"), "approval id")
+    for key in ("capture_id", "source_path", "source_hash"):
+        if approval.get(key) != proposal.get(key):
+            raise CapturePromotionError(f"approval {key.replace('_', ' ')} does not match proposal")
+    if _canonical_json(approval.get("target")) != _canonical_json(proposal.get("target")):
+        raise CapturePromotionError("approval target does not match proposal")
+    return dict(approval)
+
+
+def _target_path(repository: WikiRepository, target: Mapping[str, Any], task_id: str) -> tuple[str, str]:
+    owner_id = _required_string(target.get("owner_id"), "target owner")
+    task_list = _required_string(target.get("task_list"), "target task list")
+    if owner_id == "inbox":
+        return task_list, f"01-Projects/LifeOS/lifeos/tasks/capture-{slugify(task_id)}-{task_id}.md"
+    owner = repository.find_by_id(owner_id)
+    if owner is None or owner.record_type not in {"project", "area"}:
+        raise CapturePromotionError("target owner is not a canonical Project, Area, or Inbox")
+    return task_list, f"{Path(owner.path).parent.as_posix()}/lifeos/tasks/capture-{slugify(task_id)}-{task_id}.md"
+
+
+def _receipt(capture_id: str, task_wiki_id: str, fingerprint: str) -> str:
+    return (
+        "\n<!-- lifeos-capture-receipt\n"
+        f"capture-receipt: {capture_id}\n"
+        f"task-wiki-id: {task_wiki_id}\n"
+        f"proposal-fingerprint: {fingerprint}\n"
+        "-->\n"
+    )
+
+
+def apply_reviewed_capture(
+    session: Session,
+    repository: WikiRepository,
+    proposal: Mapping[str, Any],
+    approval: Mapping[str, Any] | None,
+    *,
+    apply: bool,
+) -> dict[str, str]:
+    """Apply one reviewed fixture capture, never mutating without ``apply=True``."""
+    if apply is not True:
+        raise CapturePromotionError("explicit apply is required")
+    capture_id = _required_string(proposal.get("capture_id"), "capture id")
+    source_path = _required_string(proposal.get("source_path"), "source path")
+    source_hash = _required_string(proposal.get("source_hash"), "source hash")
+    if len(source_hash) != 64 or any(character not in "0123456789abcdef" for character in source_hash):
+        raise CapturePromotionError("source hash must be a SHA-256 hex digest")
+    target = proposal.get("target")
+    task_values = proposal.get("task")
+    if not isinstance(target, Mapping) or not isinstance(task_values, Mapping):
+        raise CapturePromotionError("target and task are required")
+    approval_record = _validate_approval(proposal, approval)
+    source = _source_file(repository, source_path)
+    fingerprint = _proposal_fingerprint(proposal)
+    task_wiki_id = f"tsk-capture-{slugify(capture_id)}"
+    source_text = source.read_text(encoding="utf-8")
+    existing = repository.find_by_id(task_wiki_id)
+    if existing is not None and existing.fields.get("capture_promotion", {}).get("capture_id") == capture_id:
+        if _receipt(capture_id, task_wiki_id, fingerprint).strip() in source_text:
+            return {"status": "unchanged", "capture_id": capture_id, "task_wiki_id": task_wiki_id}
+        raise CapturePromotionError("capture identity exists without a matching receipt")
+    if existing is not None:
+        raise CapturePromotionError("capture task identity is already owned")
+    actual_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    if actual_hash != source_hash:
+        raise CapturePromotionError("source hash changed since proposal review")
+    task_list_name, canonical_path = _target_path(repository, target, task_wiki_id)
+    task_list = session.scalar(select(TaskList).where(TaskList.name == task_list_name))
+    if task_list is None:
+        raise CapturePromotionError("target task list does not exist")
+    session.info["wiki_repository"] = repository
+    try:
+        task = create_canonical_task(
+            session,
+            TaskCreate(
+                title=_required_string(task_values.get("title"), "task title"),
+                task_list_id=task_list.id,
+                notes=task_values.get("notes"),
+                priority=int(task_values.get("priority", 0)),
+                tags=list(task_values.get("tags", [])),
+                source_ref=f"capture:{capture_id}",
+            ),
+            "capture-promotion",
+            record_id=task_wiki_id,
+            canonical_path=canonical_path,
+            canonical_metadata={
+                "capture_promotion": {
+                    "capture_id": capture_id,
+                    "source_path": source_path,
+                    "source_hash": source_hash,
+                    "target": dict(target),
+                    "approval_id": approval_record["approval_id"],
+                    "proposal_fingerprint": fingerprint,
+                }
+            },
+            audit_action="capture_promoted",
+            audit_payload={"capture_id": capture_id, "approval_id": approval_record["approval_id"]},
+        )
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            raise CapturePromotionReconciliationRequired(
+                "canonical task source was written; reconciliation is required"
+            ) from exc
+        raise
+    repository.write_markdown(
+        source_path,
+        source_text + _receipt(capture_id, task.wiki_id, fingerprint),
+        expected_hash=source_hash,
+    )
+    return {"status": "applied", "capture_id": capture_id, "task_wiki_id": task.wiki_id}
+
+
+def _period_end(cadence: str, period: str) -> date:
+    if cadence == "weekly":
+        try:
+            year, week = period.split("-W")
+            return date.fromisocalendar(int(year), int(week), 7)
+        except ValueError as exc:
+            raise CapturePromotionError("weekly period must use YYYY-Www") from exc
+    if cadence == "monthly":
+        try:
+            year, month = (int(value) for value in period.split("-"))
+            return date(year, month, monthrange(year, month)[1])
+        except ValueError as exc:
+            raise CapturePromotionError("monthly period must use YYYY-MM") from exc
+    raise CapturePromotionError("cadence must be weekly or monthly")
+
+
+def generate_review_record(
+    session: Session,
+    repository: WikiRepository,
+    *,
+    cadence: str,
+    period: str,
+    scan: Mapping[str, Any],
+    reconciliation: Mapping[str, Any],
+) -> dict[str, str]:
+    """Render an idempotent canonical review document from scan and projection state."""
+    period_end = _period_end(cadence, period)
+    due = [
+        {"wiki_id": task.wiki_id, "due_date": task.due_date.isoformat()}
+        for task in session.scalars(select(Task).where(Task.status == "open", Task.due_date.is_not(None)))
+        if task.due_date and task.due_date <= period_end
+    ]
+    evidence = {
+        "unpromoted_captures": sorted(scan.get("unpromoted_captures", []), key=_canonical_json),
+        "inbox": sorted(scan.get("inbox", [])),
+        "overdue_or_due_next": sorted(due, key=_canonical_json),
+        "stalled_owners": sorted(scan.get("stalled_owners", []), key=_canonical_json),
+        "reconciliation_exceptions": {
+            key: reconciliation[key]
+            for key in sorted(reconciliation)
+            if key != "aligned" and reconciliation[key]
+        },
+    }
+    path = f"01-Projects/LifeOS/lifeos/reviews/{cadence}-{period.lower()}.md"
+    fields = {
+        "schema_version": "1",
+        "type": "review_record",
+        "cadence": cadence,
+        "period": period,
+        "source_backlinks": evidence,
+    }
+    body = f"# {cadence.title()} review {period}\n\n```json\n{json.dumps(evidence, indent=2, sort_keys=True)}\n```\n"
+    content = render_frontmatter(fields, body)
+    content_hash = repository.write_markdown(path, content)
+    return {"path": path, "content_hash": content_hash}

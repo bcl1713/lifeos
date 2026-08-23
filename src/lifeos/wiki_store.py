@@ -244,6 +244,36 @@ class WikiRepository:
         self._register_in_index(record_type, record)
         return record
 
+    def write_markdown(self, path: str, text: str, *, expected_hash: str | None = None) -> str:
+        """Write a non-projected Markdown document inside the canonical root."""
+        raw_target = self.root / path
+        try:
+            raw_target.relative_to(self.root)
+        except ValueError as exc:
+            raise WikiConflictError("Canonical wiki path escapes repository root") from exc
+        for candidate in (raw_target, *raw_target.parents):
+            if candidate == self.root.parent:
+                break
+            if candidate.is_symlink():
+                raise WikiConflictError("Canonical wiki path must not traverse symlinks")
+            if candidate == self.root:
+                break
+        target = raw_target.resolve()
+        try:
+            target.relative_to(self.root)
+        except ValueError as exc:
+            raise WikiConflictError("Canonical wiki path escapes repository root") from exc
+        if target.suffix.casefold() != ".md":
+            raise WikiConflictError("Canonical document must be Markdown")
+        if expected_hash is not None:
+            if not target.exists():
+                raise WikiConflictError("Canonical wiki record disappeared")
+            actual_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+            if actual_hash != expected_hash:
+                raise WikiConflictError("Canonical wiki record changed since it was read")
+        self._atomic_write(target, text)
+        return hashlib.sha256(target.read_bytes()).hexdigest()
+
     def read(self, path: str) -> WikiRecord:
         target = (self.root / path).resolve()
         target.relative_to(self.root)
