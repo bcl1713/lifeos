@@ -11,6 +11,7 @@ from lifeos.scripts_bridge import sync_wiki_projection
 from lifeos.task_relocation import (
     RelocationError,
     _wiki_snapshot_hash,
+    create_verified_backup_evidence,
     inventory_task_ownership,
     recover_relocations,
     relocate_tasks,
@@ -56,11 +57,25 @@ def _mapping(task, owner, owner_type: str = "area") -> dict:
 
 
 def _backup_evidence(tmp_path: Path, repository: WikiRepository, database_target: str = "sqlite:///target.db") -> Path:
-    wiki_backup = tmp_path / "wiki-backup.tar"
-    sqlite_backup = tmp_path / "lifeos-backup.db"
+    sequence = len(list(tmp_path.glob("verified-backup-*.json")))
+    return create_verified_backup_evidence(
+        repository,
+        database=tmp_path / "lifeos.db",
+        database_target=database_target,
+        evidence_path=tmp_path / f"verified-backup-{sequence}.json",
+        wiki_backup_path=tmp_path / f"wiki-backup-{sequence}.tar",
+        sqlite_backup_path=tmp_path / f"lifeos-backup-{sequence}.db",
+    )
+
+
+def _forged_backup_evidence(
+    tmp_path: Path, repository: WikiRepository, database_target: str = "sqlite:///target.db"
+) -> Path:
+    wiki_backup = tmp_path / "forged-wiki-backup.tar"
+    sqlite_backup = tmp_path / "forged-lifeos-backup.db"
     wiki_backup.write_bytes(b"verified wiki backup")
     sqlite_backup.write_bytes(b"verified sqlite backup")
-    evidence = tmp_path / "verified-backup.json"
+    evidence = tmp_path / "forged-verified-backup.json"
     evidence.write_text(
         json.dumps(
             {
@@ -336,6 +351,87 @@ def test_apply_requires_valid_target_bound_verified_backup_evidence(tmp_path: Pa
             backup_evidence=evidence,
         )
     assert result["relocated"] == [task.record_id]
+
+
+def test_apply_rejects_forged_regular_backup_artifacts_before_any_mutation(tmp_path: Path) -> None:
+    repository, project, area, task = _records(tmp_path)
+    factory = _session_factory(tmp_path)
+    journal_dir = tmp_path / "journals"
+    backup_dir = tmp_path / "source-backups"
+
+    with factory() as session:
+        with pytest.raises(RelocationError, match="wiki backup"):
+            relocate_tasks(
+                session,
+                repository,
+                [_mapping(task, area)],
+                journal_dir=journal_dir,
+                apply=True,
+                backup_dir=backup_dir,
+                backup_evidence=_forged_backup_evidence(tmp_path, repository),
+            )
+        assert session.scalar(select(Task).where(Task.wiki_id == task.record_id)) is None
+
+    assert repository.read(task.path).fields["owner_type"] == project.record_type
+    assert repository.read(task.path).fields["owner_wiki_id"] == project.record_id
+    assert not (repository.root / repository.task_path(area, task.title, task.record_id)).exists()
+    assert not journal_dir.exists()
+    assert not backup_dir.exists()
+
+
+def test_apply_rejects_backup_evidence_for_a_different_database_or_wiki_snapshot(tmp_path: Path) -> None:
+    repository, _project, area, task = _records(tmp_path)
+    factory = _session_factory(tmp_path)
+    backup_dir = tmp_path / "source-backups"
+    journal_dir = tmp_path / "journals"
+
+    database_evidence = _backup_evidence(tmp_path, repository, database_target="sqlite:///another.db")
+    with factory() as session:
+        with pytest.raises(RelocationError, match="database does not match"):
+            relocate_tasks(
+                session,
+                repository,
+                [_mapping(task, area)],
+                journal_dir=journal_dir,
+                apply=True,
+                backup_dir=backup_dir,
+                backup_evidence=database_evidence,
+            )
+    assert not journal_dir.exists()
+    assert not backup_dir.exists()
+
+    snapshot_evidence = _backup_evidence(tmp_path, repository)
+    repository.write("area", "Changed", {"id": "area-changed", "status": "active"})
+    with factory() as session:
+        with pytest.raises(RelocationError, match="wiki snapshot does not match"):
+            relocate_tasks(
+                session,
+                repository,
+                [_mapping(task, area)],
+                journal_dir=journal_dir,
+                apply=True,
+                backup_dir=backup_dir,
+                backup_evidence=snapshot_evidence,
+            )
+    assert not journal_dir.exists()
+    assert not backup_dir.exists()
+
+
+def test_recovery_rejects_forged_regular_backup_artifacts_before_reading_journals(tmp_path: Path) -> None:
+    repository, _project, _area, _task = _records(tmp_path)
+    factory = _session_factory(tmp_path)
+    journal_dir = tmp_path / "journals"
+    journal_dir.mkdir()
+    (journal_dir / "unfinished.json").write_text(json.dumps({"state": "planned"}), encoding="utf-8")
+
+    with factory() as session:
+        with pytest.raises(RelocationError, match="wiki backup"):
+            recover_relocations(
+                session,
+                repository,
+                journal_dir=journal_dir,
+                backup_evidence=_forged_backup_evidence(tmp_path, repository),
+            )
 
 
 def test_move_rejects_source_changed_after_preflight_without_owner_or_projection_reconciliation(

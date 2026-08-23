@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tarfile
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+from lifeos.backups import backup_database, backup_wiki, verify_backup
 from lifeos.scripts_bridge import sync_wiki_projection
 from lifeos.wiki_store import WikiRecord, WikiRepository, render_frontmatter
 
@@ -205,6 +207,70 @@ def _wiki_snapshot_hash(root: Path) -> str:
     return digest.hexdigest()
 
 
+def _wiki_backup_snapshot_hash(backup: Path) -> str:
+    """Return the canonical snapshot hash of a normal wiki tar backup."""
+    digest = hashlib.sha256()
+    try:
+        with tarfile.open(backup, "r") as archive:
+            members = archive.getmembers()
+            paths = [member.name for member in members]
+            if len(paths) != len(set(paths)):
+                raise RelocationError("verified backup evidence wiki backup has duplicate paths")
+            for member in sorted(members, key=lambda item: item.name):
+                path = Path(member.name)
+                if path.is_absolute() or ".." in path.parts:
+                    raise RelocationError("verified backup evidence wiki backup has an unsafe path")
+                if member.isdir():
+                    continue
+                if not member.isfile():
+                    raise RelocationError("verified backup evidence wiki backup has a non-regular member")
+                contents = archive.extractfile(member)
+                if contents is None:
+                    raise RelocationError("verified backup evidence wiki backup member is unreadable")
+                relative = member.name.encode()
+                digest.update(len(relative).to_bytes(8, "big"))
+                digest.update(relative)
+                digest.update(hashlib.sha256(contents.read()).digest())
+    except (OSError, tarfile.TarError) as exc:
+        raise RelocationError("verified backup evidence wiki backup is not a readable tar archive") from exc
+    return digest.hexdigest()
+
+
+def create_verified_backup_evidence(
+    repository: WikiRepository,
+    *,
+    database: str | Path,
+    database_target: str,
+    evidence_path: str | Path,
+    wiki_backup_path: str | Path,
+    sqlite_backup_path: str | Path,
+) -> Path:
+    """Create target-bound normal wiki and SQLite backup evidence outside relocation."""
+    wiki_backup = backup_wiki(repository.root, Path(wiki_backup_path))
+    sqlite_backup = backup_database(Path(database), Path(sqlite_backup_path))
+    verify_backup(sqlite_backup)
+    snapshot = _wiki_snapshot_hash(repository.root.resolve())
+    if _wiki_backup_snapshot_hash(wiki_backup) != snapshot:
+        raise RelocationError("normal wiki backup does not match the declared snapshot")
+    evidence = {
+        "version": 2,
+        "wiki_root": str(repository.root.resolve()),
+        "wiki_snapshot_sha256": snapshot,
+        "database": database_target,
+        "wiki_backup": {
+            "path": str(wiki_backup),
+            "sha256": hashlib.sha256(wiki_backup.read_bytes()).hexdigest(),
+        },
+        "sqlite_backup": {
+            "path": str(sqlite_backup),
+            "sha256": hashlib.sha256(sqlite_backup.read_bytes()).hexdigest(),
+        },
+    }
+    output = Path(evidence_path)
+    _write_json(output, evidence)
+    return output
+
+
 def _verified_backup_evidence(
     evidence_path: str | Path | None,
     repository: WikiRepository,
@@ -241,6 +307,16 @@ def _verified_backup_evidence(
             raise RelocationError(f"verified backup evidence {key} is not a regular file")
         if hashlib.sha256(path.read_bytes()).hexdigest() != backup["sha256"]:
             raise RelocationError(f"verified backup evidence {key} hash does not match")
+        if key == "wiki_backup":
+            if _wiki_backup_snapshot_hash(path) != evidence["wiki_snapshot_sha256"]:
+                raise RelocationError("verified backup evidence wiki backup does not match the declared snapshot")
+        else:
+            try:
+                verify_backup(path)
+            except (OSError, RuntimeError) as exc:
+                raise RelocationError(
+                    "verified backup evidence sqlite backup is not a verified LifeOS database"
+                ) from exc
     return evidence
 
 

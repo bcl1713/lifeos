@@ -4,26 +4,10 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-
-def backup_database(source: Path, destination: Path) -> Path:
-    source = source.resolve()
-    destination = destination.resolve()
-    if not source.exists():
-        raise FileNotFoundError(source)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination == source:
-        raise ValueError("backup destination must differ from source")
-    with sqlite3.connect(source) as source_connection:
-        source_connection.execute("PRAGMA wal_checkpoint(FULL)")
-        with sqlite3.connect(destination) as destination_connection:
-            source_connection.backup(destination_connection)
-            destination_connection.execute("PRAGMA integrity_check")
-            destination_connection.commit()
-    return destination
+from lifeos.backups import backup_database
 
 
 def main() -> None:
