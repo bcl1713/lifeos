@@ -32,7 +32,7 @@ for (const width of viewports) {
     await menuButton.press('Enter');
     await expect(menuButton).toHaveAttribute('aria-expanded', 'true');
     const controls = page.locator('header nav a, header nav button');
-    await expect(controls).toHaveCount(8);
+    await expect(controls).toHaveCount(6);
     for (const control of await controls.all()) {
       await expect(control).toBeVisible();
       const box = await control.boundingBox();
@@ -54,8 +54,6 @@ for (const width of viewports) {
       ['Projects', '/projects'],
       ['Areas', '/areas'],
       ['Tasks', '/tasks'],
-      ['Goals', '/goals'],
-      ['Routines', '/routines'],
       ['Data', '/data'],
     ]) {
       await page.getByRole('link', { name }).click();
@@ -79,7 +77,7 @@ test('mobile navigation remains available without JavaScript', async ({ browser 
   await page.getByRole('button', { name: 'Sign in' }).click();
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' });
   await expect(navigation).toBeVisible();
-  await expect(navigation.getByRole('link')).toHaveCount(7);
+  await expect(navigation.getByRole('link')).toHaveCount(5);
   await expect(navigation.getByRole('button', { name: 'Log out' })).toBeVisible();
   await context.close();
 });
