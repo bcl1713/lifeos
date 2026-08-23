@@ -56,10 +56,44 @@ python scripts/relocate_wiki_tasks.py \
   --mapping /backups/relocation-mapping.json \
   --journal-dir /backups/task-relocation-journal \
   --backup-dir /backups/task-relocation-source-backups \
+  --backup-evidence /backups/task-relocation-backup-evidence.json \
   --apply
 ```
 
-`--apply` is rejected without both `--mapping` and `--backup-dir`. The backup directory is mandatory and must already be treated by the operator as a verified backup destination for this exact run. The tool creates a per-source Markdown backup there before moving that source, but it does not prove that a supplied directory is a complete wiki or SQLite backup. Verify the normal wiki archive and SQLite backup separately before the apply gate, retain their paths with the change record, and use a new empty per-run source-backup directory so an existing backup filename stops the run rather than being overwritten.
+`--apply` is rejected without `--mapping`, `--backup-dir`, and `--backup-evidence`. The per-source backup directory is still mandatory, but it is not the normal wiki or SQLite backup set. Use a new empty per-run source-backup directory so an existing backup filename stops the run rather than being overwritten.
+
+## Verified backup evidence
+
+Before an authorized apply, create the normal backup set and its evidence with
+the implementation's dedicated command. Do not hand-author the evidence JSON or
+substitute the per-source Markdown backup directory for these artifacts:
+
+```bash
+python scripts/create_relocation_backup_evidence.py \
+  --wiki-root /wiki \
+  --database /data/lifeos.db \
+  --database-target sqlite:////data/lifeos.db \
+  --wiki-backup /backups/task-relocation-wiki.tar \
+  --sqlite-backup /backups/task-relocation.db \
+  --evidence /backups/task-relocation-backup-evidence.json
+```
+
+`--database` is the local SQLite file to copy. `--database-target` must be the
+exact database URL that will be supplied to `relocate_wiki_tasks.py`; it is a
+target binding, not a description. Likewise, use the exact target wiki root in
+both commands. The resulting version-2 evidence records the resolved
+`wiki_root`, `wiki_snapshot_sha256`, `database`, and a `wiki_backup` plus
+`sqlite_backup` entry. Each artifact entry contains its path and SHA-256 hash.
+The command creates a normal regular-file wiki tar and a normal SQLite backup,
+validates the SQLite backup, and confirms that the wiki tar represents the
+recorded snapshot.
+
+At apply time, the tool requires that evidence to match the target wiki root and
+database URL, validates both artifact hashes and formats, and rejects a current
+wiki whose snapshot differs from `wiki_snapshot_sha256` before relocation or
+projection mutation begins. Retain the evidence file and both artifacts unchanged
+with the mapping and operator record. A new evidence set is required if the
+target wiki changes after evidence creation.
 
 ## Preflight stop conditions
 
@@ -91,22 +125,43 @@ python scripts/relocate_wiki_tasks.py \
   --database sqlite:////data/lifeos.db \
   --wiki-root /wiki \
   --journal-dir /backups/task-relocation-journal \
+  --backup-evidence /backups/task-relocation-backup-evidence.json \
   --recover
 ```
 
-`--recover` accepts no `--mapping`. It refuses to guess: if the source still exists, rerun the original mapping after investigation; if neither a safe destination nor source exists, or destination identity/owner identity does not match the journal, stop and escalate. For a safe moved destination, recovery restores the requested owner fields if needed, refreshes the projection, and marks the journal complete.
+`--recover` accepts no `--mapping` and requires `--backup-evidence`. It validates
+the evidence target binding and the integrity of the regular hashed wiki and
+SQLite artifacts. Recovery intentionally does **not** require the current wiki
+snapshot to equal the pre-relocation snapshot: the expected interruption state
+may already contain the intentionally moved source. This exception is only for
+the current-snapshot comparison; it does not waive artifact, target, journal,
+destination identity, or owner identity validation. It refuses to guess: if the
+source still exists, rerun the original mapping after investigation; if neither
+a safe destination nor source exists, or destination identity/owner identity
+does not match the journal, stop and escalate. For a safe moved destination,
+recovery restores the requested owner fields if needed, refreshes the
+projection, and marks the journal complete.
 
 ## Authorized future procedure
 
 This section describes the order required **after** the explicit Brian gate; it is not authorization to perform it now.
 
 1. Record the gate, exact target/wiki root, mapping-file hash, maintenance window, and operator.
-2. Take and verify fresh normal wiki and SQLite backups. Preserve the backup paths and verify the SQLite backup with `scripts/verify_backup.py`.
+2. Create fresh version-2 verified backup evidence with
+   `scripts/create_relocation_backup_evidence.py`, using the exact target wiki
+   root and database URL. Preserve the evidence JSON and its normal wiki tar
+   and SQLite backup artifacts. Do not proceed if the command cannot validate
+   them, and do not hand-edit the evidence.
 3. Run `scripts/sync_wiki_projection.py --check`; stop for any reconciliation failure, including `invalid_task_owners`, duplicate/authority conflict, stale hash, missing identity, or path conflict.
 4. Run the inventory command and save its JSON. Review every proposed ownership and relationship against canonical source.
 5. Build the exact mapping JSON from that inventory, review it independently, and run the mapping dry run. Resolve every preflight conflict; do not proceed on warnings or a changed hash.
 6. Confirm the per-run backup and journal directories are separate, writable, retained, and associated with the verified backup set.
-7. Only under the explicit gate, run the `--apply` command above. Record its JSON output and every journal path. If it stops after a source move, do not rerun with a new mapping; use `--recover` once the destination/journal identity is verified.
+7. Only under the explicit gate, run the `--apply` command above with the
+   unchanged `--backup-evidence` path. Record its JSON output and every journal
+   path. If it stops after a source move, do not rerun with a new mapping; use
+   `--recover` with the same evidence once the destination/journal identity is
+   verified. Recovery validates the evidence artifacts but permits the
+   intentional post-move wiki snapshot difference.
 8. Run `scripts/sync_wiki_projection.py --check` after relocation. Then rebuild or refresh only through the approved projection workflow and repeat `--check` until aligned. Verify the affected Task's canonical path, stable ID, owner fields, and relationships from source and the rebuilt projection.
 
 ## Rollback and reconciliation
