@@ -6,15 +6,12 @@ from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI
 
-from lifeos.routine_service import generate_all_routines
-
 logger = logging.getLogger(__name__)
 
 
 def generate_due_once(app: FastAPI, on: date) -> int:
-    with app.state.session_factory() as session:
-        session.info["wiki_repository"] = app.state.wiki_repository
-        return generate_all_routines(session, on, "scheduler")
+    """Keep the scheduler inert while legacy recurrence awaits reviewed mapping."""
+    return 0
 
 
 async def _scheduler_loop(app: FastAPI) -> None:
@@ -25,17 +22,17 @@ async def _scheduler_loop(app: FastAPI) -> None:
             today = datetime.now(timezone).date()
             generated = await asyncio.to_thread(generate_due_once, app, today)
             if generated:
-                logger.info("Generated %s routine task occurrence(s)", generated)
+                logger.info("Skipped %s retired routine task occurrence(s)", generated)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Routine generation cycle failed")
+            logger.exception("Retired routine scheduler cycle failed")
         await asyncio.sleep(interval)
 
 
 @asynccontextmanager
 async def scheduler_lifespan(app: FastAPI):
-    task = asyncio.create_task(_scheduler_loop(app), name="lifeos-routine-scheduler")
+    task = asyncio.create_task(_scheduler_loop(app), name="lifeos-retired-routine-scheduler")
     app.state.scheduler_task = task
     try:
         yield

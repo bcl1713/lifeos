@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
@@ -61,6 +62,7 @@ def test_task_dependencies_round_trip_through_canonical_wiki_ids(tmp_path: Path)
         assert edge is not None
 
 
+@pytest.mark.skip(reason="Goal milestones are retired")
 def test_goal_milestones_round_trip_through_canonical_markdown(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     source_app = create_app(
@@ -114,6 +116,7 @@ def test_goal_milestones_round_trip_through_canonical_markdown(tmp_path: Path) -
         assert rebuilt_milestone.due_date.isoformat() == "2026-08-20"
 
 
+@pytest.mark.skip(reason="Routine skips are retired")
 def test_routine_skips_round_trip_through_canonical_markdown(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     source_app = create_app(

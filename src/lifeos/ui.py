@@ -1,5 +1,5 @@
-from datetime import date
 import os
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -9,8 +9,9 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lifeos.context_api import ProjectCreate, create_project
 from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
-from lifeos.context_api import GoalCreate, ProjectCreate, RoutineCreate, create_goal, create_project, create_routine
+from lifeos.legacy_retirement import raise_legacy_domain_retired
 from lifeos.task_api import (
     TaskCreate,
     create_task,
@@ -303,17 +304,14 @@ def _canonical_items(
 def goals_page(
     request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> HTMLResponse:
-    return render_context(
-        request, username, session, "Goals", "goal", list(session.scalars(select(Goal).order_by(Goal.id))), "/ui/goals"
-    )
+    raise_legacy_domain_retired("goals")
 
 
 @router.post("/ui/goals", status_code=status.HTTP_303_SEE_OTHER)
 def create_ui_goal(
     title: str = Form(...), username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> RedirectResponse:
-    create_goal(GoalCreate(title=title.strip()), actor=username, session=session)
-    return RedirectResponse("/goals", status_code=status.HTTP_303_SEE_OTHER)
+    raise_legacy_domain_retired("goals")
 
 
 @router.get("/projects", response_class=HTMLResponse)
@@ -412,41 +410,15 @@ def create_ui_project(
 def routines_page(
     request: Request, username: str = Depends(require_user), session: Session = Depends(get_session)
 ) -> HTMLResponse:
-    ensure_default_list(session)
-    return render_context(
-        request,
-        username,
-        session,
-        "Routines",
-        "routine",
-        list(session.scalars(select(Routine).order_by(Routine.id))),
-        "/ui/routines",
-    )
+    raise_legacy_domain_retired("routines")
 
 
 @router.post("/ui/routines", status_code=status.HTTP_303_SEE_OTHER)
 def create_ui_routine(
-    title: str = Form(...),
-    cadence: str = Form(...),
-    start_date: str = Form(...),
-    task_list_id: int = Form(...),
-    goal_id: str = Form(default=""),
     username: str = Depends(require_user),
     session: Session = Depends(get_session),
 ) -> RedirectResponse:
-    parsed_goal = int(goal_id) if goal_id else None
-    create_routine(
-        RoutineCreate(
-            title=title.strip(),
-            cadence=cadence.strip(),
-            start_date=date.fromisoformat(start_date),
-            task_list_id=task_list_id,
-            goal_id=parsed_goal,
-        ),
-        actor=username,
-        session=session,
-    )
-    return RedirectResponse("/routines", status_code=status.HTTP_303_SEE_OTHER)
+    raise_legacy_domain_retired("routines")
 
 
 @router.get("/context", status_code=status.HTTP_308_PERMANENT_REDIRECT)
@@ -460,9 +432,9 @@ def data_page(
 ) -> HTMLResponse:
     counts = {
         "tasks": session.scalar(select(func.count()).select_from(Task)) or 0,
-        "goals": session.scalar(select(func.count()).select_from(Goal)) or 0,
+        "legacy_goals": session.scalar(select(func.count()).select_from(Goal)) or 0,
         "projects": session.scalar(select(func.count()).select_from(Project)) or 0,
-        "routines": session.scalar(select(func.count()).select_from(Routine)) or 0,
+        "legacy_routines": session.scalar(select(func.count()).select_from(Routine)) or 0,
         "metrics": session.scalar(select(func.count()).select_from(MetricDefinition)) or 0,
         "metric_entries": session.scalar(select(func.count()).select_from(MetricEntry)) or 0,
         "audit": session.scalar(select(func.count()).select_from(AuditRecord)) or 0,

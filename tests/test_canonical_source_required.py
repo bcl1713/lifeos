@@ -4,14 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
-from lifeos.domain import Goal, Project, Routine, Task
+from lifeos.domain import Project, Routine, Task
 from lifeos.main import create_app
 
 
 @pytest.mark.parametrize(
     ("path", "payload", "model"),
     [
-        ("/api/goals", {"title": "No source goal"}, Goal),
         ("/api/projects", {"title": "No source project"}, Project),
     ],
 )
@@ -57,7 +56,7 @@ def test_task_and_routine_creation_fail_closed_without_wiki(tmp_path: Path) -> N
     )
 
     assert task_response.status_code == 503
-    assert routine_response.status_code == 503
+    assert routine_response.status_code == 410
     with app.state.session_factory() as session:
         assert session.scalar(select(func.count()).select_from(Task)) == 0
         assert session.scalar(select(func.count()).select_from(Routine)) == 0

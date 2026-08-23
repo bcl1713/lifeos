@@ -20,6 +20,7 @@ from lifeos.domain import (
     Task,
     TaskList,
 )
+from lifeos.legacy_retirement import legacy_retirement_report, raise_legacy_domain_retired
 from lifeos.routine_service import generate_all_routines, generate_routine_tasks
 from lifeos.task_api import (
     get_actor,
@@ -175,8 +176,8 @@ class RoutineSkipCreate(BaseModel):
 
 
 def _require_goal(session: Session, goal_id: int | None) -> None:
-    if goal_id is not None and session.get(Goal, goal_id) is None:
-        raise HTTPException(status_code=404, detail="Goal not found")
+    if goal_id is not None:
+        raise_legacy_domain_retired("goals")
 
 
 def _require_project(session: Session, project_id: int | None) -> None:
@@ -279,13 +280,21 @@ def _wiki_sync(
 
 @router.get("/goals")
 def list_goals(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return [_goal_resource(session, goal) for goal in session.scalars(select(Goal).order_by(Goal.id))]
+    raise_legacy_domain_retired("goals")
+
+
+@router.get("/legacy/goals-routines/report")
+def legacy_goals_routines_report(
+    _actor: str = Depends(get_actor), session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    return legacy_retirement_report(session, session.info.get("wiki_repository"))
 
 
 @router.post("/goals", status_code=status.HTTP_201_CREATED)
 def create_goal(
     payload: GoalCreate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("goals")
     values = payload.model_dump()
     values["title"] = values["title"].strip()
     repository: WikiRepository | None = session.info.get("wiki_repository")
@@ -329,6 +338,7 @@ def create_goal(
 def update_goal(
     goal_id: int, payload: GoalUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("goals")
     goal = session.get(Goal, goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -362,6 +372,7 @@ def create_milestone(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("goals")
     goal = session.get(Goal, goal_id)
     if goal is None:
         raise HTTPException(status_code=404, detail="Goal not found")
@@ -414,6 +425,7 @@ def update_milestone(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("goals")
     milestone = session.get(GoalMilestone, milestone_id)
     if milestone is None or milestone.goal_id != goal_id:
         raise HTTPException(status_code=404, detail="Milestone not found")
@@ -598,15 +610,17 @@ def update_idea(
 
 @router.get("/routines")
 def list_routines(_actor: str = Depends(get_actor), session: Session = Depends(get_session)) -> list[dict[str, Any]]:
-    return [_resource(routine) for routine in session.scalars(select(Routine).order_by(Routine.id))]
+    raise_legacy_domain_retired("routines")
 
 
 @router.post("/routines", status_code=status.HTTP_201_CREATED)
 def create_routine(
-    payload: RoutineCreate,
+    payload: Any = None,
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("routines")
+    assert payload is not None
     _require_goal(session, payload.goal_id)
     task_list = session.get(TaskList, payload.task_list_id)
     if task_list is None:
@@ -672,6 +686,7 @@ def generate_all(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, int]:
+    raise_legacy_domain_retired("routines")
     try:
         generated = generate_all_routines(session, on or date.today(), actor)
     except WikiConflictError as exc:
@@ -698,6 +713,7 @@ def routine_frequency(
     _actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("routines")
     routine = session.get(Routine, routine_id)
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
@@ -737,6 +753,7 @@ def skip_routine(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("routines")
     routine = session.get(Routine, routine_id)
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
@@ -789,6 +806,7 @@ def skip_routine(
 def update_routine(
     routine_id: int, payload: RoutineUpdate, actor: str = Depends(get_actor), session: Session = Depends(get_session)
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("routines")
     routine = session.get(Routine, routine_id)
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
@@ -829,6 +847,7 @@ def generate_routine(
     actor: str = Depends(get_actor),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    raise_legacy_domain_retired("routines")
     routine = session.get(Routine, routine_id)
     if routine is None:
         raise HTTPException(status_code=404, detail="Routine not found")
