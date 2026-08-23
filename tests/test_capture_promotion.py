@@ -89,7 +89,12 @@ def _setup(tmp_path: Path):
     (wiki / ".lifeos-fixture").write_text("lifeos-test-fixture-v1\n", encoding="utf-8")
     capture = wiki / "00-Daily/2026-08-23.md"
     capture.parent.mkdir(parents=True)
-    capture.write_text("# 2026-08-23\n\n- [ ] Follow up with supplier\n", encoding="utf-8")
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        "- [ ] [lifeos-capture id=cap-2026-08-23-follow-up target=inbox priority=2] "
+        "Follow up with supplier\n",
+        encoding="utf-8",
+    )
     engine = create_engine(f"sqlite:///{tmp_path / 'lifeos.db'}")
     initialize_database(engine)
     factory = create_session_factory(engine)
@@ -196,6 +201,20 @@ def test_reviewed_scanner_proposal_rejects_stale_or_rebound_envelopes_before_sou
         assert repository.find_by_id("tsk-capture-cap-2026-08-23-scanned") is None
 
 
+def test_reviewed_capture_rejects_approved_non_capture_envelope_before_mutation(tmp_path: Path) -> None:
+    wiki, capture, factory = _setup(tmp_path)
+    repository = WikiRepository(wiki)
+    capture.write_text("# 2026-08-23\n\n- [ ] Unmarked but caller-approved task\n", encoding="utf-8")
+    proposal = _proposal(capture)
+    original = capture.read_text(encoding="utf-8")
+
+    with factory() as session, pytest.raises(CapturePromotionError, match="scanner"):
+        apply_reviewed_capture(session, repository, proposal, _approval(proposal), apply=True)
+
+    assert capture.read_text(encoding="utf-8") == original
+    assert repository.list_records("task") == []
+
+
 def test_reviewed_capture_apply_preflights_all_invalid_inputs_without_writes(tmp_path: Path) -> None:
     wiki, capture, factory = _setup(tmp_path)
     repository = WikiRepository(wiki)
@@ -214,7 +233,7 @@ def test_reviewed_capture_apply_preflights_all_invalid_inputs_without_writes(tmp
             "approval",
         ),
         (proposal, None, "approval"),
-        (missing_project, _approval(missing_project), "target"),
+        (missing_project, _approval(missing_project), "scanner"),
     ]
     for candidate, approval, message in invalid:
         with factory() as session, pytest.raises(CapturePromotionError, match=message):
@@ -245,7 +264,13 @@ def test_reviewed_capture_places_project_target_task_under_owner_path(tmp_path: 
     wiki, capture, factory = _setup(tmp_path)
     repository = WikiRepository(wiki)
     project = repository.write("project", "Home renovation", {"id": "prj-home", "status": "active"})
-    proposal = _proposal(capture, target={"type": "project", "id": project.record_id, "path": project.path})
+    capture.write_text(
+        "# 2026-08-23\n\n"
+        f"- [ ] [lifeos-capture id=cap-2026-08-23-follow-up target=project:{project.record_id} priority=2] "
+        "Follow up with supplier\n",
+        encoding="utf-8",
+    )
+    proposal = scan_daily_captures(repository, daily_root="00-Daily", start="2026-08-23", end="2026-08-23")["proposals"][0]
 
     with factory() as session:
         result = apply_reviewed_capture(session, repository, proposal, _approval(proposal), apply=True)

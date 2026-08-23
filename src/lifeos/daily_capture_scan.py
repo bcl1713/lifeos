@@ -111,7 +111,12 @@ def _read_daily_note(path: Path, repository: WikiRepository) -> str:
 
 
 def scan_daily_captures(
-    repository: WikiRepository, *, daily_root: str | Path, start: str | date, end: str | date
+    repository: WikiRepository,
+    *,
+    daily_root: str | Path,
+    start: str | date,
+    end: str | date,
+    include_promoted: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     """Read date-named Markdown notes and return deterministic proposals without writes.
 
@@ -260,7 +265,7 @@ def scan_daily_captures(
         if capture_id in duplicate_capture_ids:
             continue
         existing = promoted.get(capture_id)
-        if existing is not None:
+        if existing is not None and not include_promoted:
             promoted_task = existing[0]
             if promoted_task.fields.get("daily_capture_source_hash") == candidate["source_hash"]:
                 code, detail = "already_promoted", "capture id already has a canonical task with this source hash"

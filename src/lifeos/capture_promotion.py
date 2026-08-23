@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from lifeos.daily_capture_scan import scan_daily_captures
 from lifeos.domain import Task, TaskList
 from lifeos.task_api import TaskCreate, create_canonical_task
 from lifeos.wiki_store import WikiConflictError, WikiRecord, WikiRepository, render_frontmatter, slugify
@@ -118,6 +119,37 @@ def _scanner_source_hash(source_text: str, source_line: Any) -> str:
     return hashlib.sha256(lines[source_line - 1].encode("utf-8")).hexdigest()
 
 
+def _scanner_proposal(repository: WikiRepository, proposal: Mapping[str, Any]) -> dict[str, Any]:
+    """Reconstruct the source proposal and reject caller-supplied substitutions."""
+    source_path = _required_string(proposal.get("source_path"), "source path")
+    source_line = proposal.get("source_line")
+    daily_root = Path(source_path).parent
+    if daily_root == Path("."):
+        raise CapturePromotionError("scanner proposal source must be inside a daily root")
+    try:
+        note_date = date.fromisoformat(Path(source_path).stem)
+        report = scan_daily_captures(
+            repository,
+            daily_root=daily_root,
+            start=note_date,
+            end=note_date,
+            include_promoted=True,
+        )
+    except ValueError as exc:
+        raise CapturePromotionError("scanner proposal source is not an eligible daily capture") from exc
+    matches = [
+        candidate
+        for candidate in report["proposals"]
+        if candidate["source_path"] == source_path and candidate["source_line"] == source_line
+    ]
+    if len(matches) != 1:
+        raise CapturePromotionError("scanner did not emit the referenced eligible capture")
+    scanner_proposal = matches[0]
+    if _canonical_json(scanner_proposal) != _canonical_json(proposal):
+        raise CapturePromotionError("proposal diverges from the scanner-derived capture")
+    return scanner_proposal
+
+
 def _receipt(capture_id: str, task_wiki_id: str, fingerprint: str) -> str:
     return (
         "\n<!-- lifeos-capture-receipt\n"
@@ -152,11 +184,21 @@ def apply_reviewed_capture(
         raise CapturePromotionError("target is required")
     approval_record = _validate_approval(proposal, approval)
     source = _source_file(repository, source_path)
-    fingerprint = _proposal_fingerprint(proposal)
+    source_bytes = source.read_bytes()
+    source_text = source_bytes.decode("utf-8")
+    if _scanner_source_hash(source_text, source_line) != source_hash:
+        raise CapturePromotionError("source hash changed since proposal review")
+    scanner_proposal = _scanner_proposal(repository, proposal)
+    capture_id = str(scanner_proposal["capture_id"])
+    source_path = str(scanner_proposal["source_path"])
+    source_hash = str(scanner_proposal["source_hash"])
+    source_line = scanner_proposal["source_line"]
+    target = scanner_proposal["target"]
+    fingerprint = _proposal_fingerprint(scanner_proposal)
     task_wiki_id = f"tsk-capture-{slugify(capture_id)}"
     source_bytes = source.read_bytes()
     source_text = source_bytes.decode("utf-8")
-    task_values = _scanner_task_values(proposal)
+    task_values = _scanner_task_values(scanner_proposal)
     actual_hash = _scanner_source_hash(source_text, source_line)
     task_list_name, owner_type, owner_wiki_id = _scanner_target_owner(repository, target)
     existing = repository.find_by_id(task_wiki_id)
