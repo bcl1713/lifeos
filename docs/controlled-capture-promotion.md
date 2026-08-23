@@ -51,7 +51,15 @@ matching approval; do not reuse or hand-edit an old approval.
 ## Fixture-only apply workflow
 
 Use only a disposable fixture root created for this test. The root must contain a
-regular, non-symlink `.lifeos-fixture` file whose entire content is exactly:
+regular, non-symlink `.lifeos-fixture` file whose entire content is exactly the ASCII
+bytes `lifeos-test-fixture-v1` followed by one terminating LF (`0x0A`). Create the
+marker with this exact command (where the fixture root is new and disposable):
+
+```bash
+printf '%s\n' 'lifeos-test-fixture-v1' > /absolute/path/to/lifeos-test-fixture/.lifeos-fixture
+```
+
+The resulting file content is:
 
 ```text
 lifeos-test-fixture-v1
@@ -64,7 +72,8 @@ or writes proposal data:
 - a root without `.lifeos-fixture`;
 - a symlinked marker;
 - a marker that is not a regular file; or
-- a marker whose content differs from the exact value above.
+- a marker whose content differs from the exact byte sequence above, including its
+  terminating LF.
 
 The canonical source path must also remain a Markdown path beneath the chosen fixture
 root; absolute paths, traversal, symlink traversal, and missing source files are
