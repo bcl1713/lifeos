@@ -49,6 +49,16 @@ even when the variable is set. Verify a Project and Area path (including a path
 with spaces) after changing the setting. Full behavior and safety guidance:
 `docs/rendered-source-navigation.md`.
 
+## Wiki checkbox discovery (reviewed contract, pending integration)
+
+The separately reviewed checkbox discovery work is documented in
+`docs/wiki-checkbox-task-discovery.md`. Until its implementation PRs and this
+documentation PR merge to `dev`, treat that guide as prospective: do not infer a
+production deployment, run a real-wiki apply, add a source-writing job, or make
+a `main` change. After the approved integration, use its read-only browser/API
+checks and recovery guidance; do not use SQLite or a watcher as an authority or
+repair mechanism.
+
 ## Backup and restore
 
 Create an online backup from the running container:
