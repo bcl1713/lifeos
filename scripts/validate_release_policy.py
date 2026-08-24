@@ -10,7 +10,8 @@ from pathlib import Path
 SEMVER_CORE = r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
 RC_VERSION = re.compile(rf"^v(?P<version>{SEMVER_CORE})-rc\.(?:[1-9]\d*)$")
 STABLE_VERSION = re.compile(rf"^v(?P<version>{SEMVER_CORE})$")
-PACKAGE_SEMVER = re.compile(rf"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)$")
+DEV_VERSION = re.compile(rf"^v(?P<version>{SEMVER_CORE})-dev\.(?P<number>[1-9]\d*)$")
+PACKAGE_SEMVER = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)$")
 RUN_NUMBER = re.compile(r"^[1-9]\d*$")
 PACKAGE_VERSION = re.compile(rf'^version\s*=\s*"(?P<version>{SEMVER_CORE})"\s*$', re.MULTILINE)
 
@@ -26,6 +27,20 @@ def derive_dev_version(package_version: str, run_number: str) -> str:
         f"v{package_match.group('major')}.{package_match.group('minor')}"
         f".{int(package_match.group('patch')) + 1}-dev.{run_number}"
     )
+
+
+def derive_package_version(build_version: str) -> str:
+    """Convert a published release tag to the PEP 440 package identity."""
+    dev_match = DEV_VERSION.fullmatch(build_version)
+    if dev_match:
+        return f"{dev_match.group('version')}.dev{dev_match.group('number')}"
+    rc_match = RC_VERSION.fullmatch(build_version)
+    if rc_match:
+        return f"{rc_match.group('version')}rc{build_version.rsplit('.', maxsplit=1)[1]}"
+    stable_match = STABLE_VERSION.fullmatch(build_version)
+    if stable_match:
+        return stable_match.group("version")
+    raise ValueError(f"invalid artifact build version: {build_version}")
 
 
 def validate_release(version: str, package_version: str, mode: str) -> list[str]:
@@ -68,6 +83,8 @@ def validate_repository(repository: Path) -> list[str]:
         '"${{ github.event_name }}" = "push"',
         '"${{ github.ref }}" = "refs/heads/dev"',
         "--mode dev --run-number \"$GITHUB_RUN_NUMBER\"",
+        "--mode package --version \"$version\"",
+        "package_version",
         '"${{ github.ref }}" != "refs/heads/dev"',
         "--mode rc",
         "--mode stable",
@@ -79,14 +96,17 @@ def validate_repository(repository: Path) -> list[str]:
         "type=raw,value=sha-${{ github.sha }}",
         "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}",
         "LIFEOS_BUILD_REVISION=${{ github.sha }}",
+        "LIFEOS_PACKAGE_VERSION=${{ needs.verify.outputs.package_version }}",
         "id: immutable_tags",
         "echo \"sha_unpublished=false\" >> \"$GITHUB_OUTPUT\"",
         "echo \"version_unpublished=false\" >> \"$GITHUB_OUTPUT\"",
         "version_digest",
+        "version_revision",
+        "version_label",
+        "refusing to use existing image tag with different immutable identity",
         "sha_digest",
         "enable=${{ steps.immutable_tags.outputs.sha_unpublished }}",
-        "steps.immutable_tags.outputs.sha_unpublished == 'true'",
-        "docker buildx imagetools create --tag \"ghcr.io/bcl1713/lifeos:$VERSION\"",
+        "steps.immutable_tags.outputs.version_unpublished == 'true'",
         "--generate-notes",
         "--prerelease",
         "gh release view \"$VERSION\"",
@@ -106,7 +126,7 @@ def validate_repository(repository: Path) -> list[str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("dev", "rc", "stable"))
+    parser.add_argument("--mode", choices=("dev", "rc", "stable", "package"))
     parser.add_argument("--version")
     parser.add_argument("--run-number")
     parser.add_argument("--package-file", type=Path, default=Path("pyproject.toml"))
@@ -116,7 +136,14 @@ def main() -> int:
     errors: list[str] = []
     if args.repository:
         errors.extend(validate_repository(args.repository))
-    if args.mode == "dev":
+    if args.mode == "package":
+        if not args.version or args.run_number:
+            parser.error("--mode package requires --version and does not accept --run-number")
+        try:
+            print(derive_package_version(args.version))
+        except ValueError as error:
+            errors.append(str(error))
+    elif args.mode == "dev":
         if args.version or not args.run_number:
             parser.error("--mode dev requires --run-number and does not accept --version")
         resolved_package_version = package_version(args.package_file)

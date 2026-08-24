@@ -4,7 +4,12 @@ from pathlib import Path
 
 import pytest
 
-from scripts.validate_release_policy import derive_dev_version, validate_release, validate_repository
+from scripts.validate_release_policy import (
+    derive_dev_version,
+    derive_package_version,
+    validate_release,
+    validate_repository,
+)
 
 
 @pytest.mark.parametrize(
@@ -65,6 +70,24 @@ def test_dev_release_derives_a_unique_next_patch_semver_prerelease(
     assert derive_dev_version(package_version, run_number) == expected
 
 
+@pytest.mark.parametrize(
+    ("build_version", "expected"),
+    [
+        ("v0.6.3-dev.51", "0.6.3.dev51"),
+        ("v0.6.3-rc.1", "0.6.3rc1"),
+        ("v0.6.3", "0.6.3"),
+    ],
+)
+def test_artifact_package_version_uses_pep440_identity(build_version: str, expected: str) -> None:
+    assert derive_package_version(build_version) == expected
+
+
+@pytest.mark.parametrize("build_version", ["0.6.3", "v0.6.3-dev.0", "v0.6.3-rc.0", "v0.06.3"])
+def test_artifact_package_version_rejects_non_release_build_versions(build_version: str) -> None:
+    with pytest.raises(ValueError, match="artifact build version"):
+        derive_package_version(build_version)
+
+
 @pytest.mark.parametrize("package_version", ["0.6", "01.6.2", "0.6.02", "v0.6.2"])
 def test_dev_release_rejects_an_invalid_package_version(package_version: str) -> None:
     with pytest.raises(ValueError, match="package version"):
@@ -83,8 +106,14 @@ def test_repository_release_workflows_enforce_channel_boundaries() -> None:
     assert errors == []
 
 
-def test_release_workflow_preserves_original_build_identity_when_promoting_a_sha_image() -> None:
+def test_release_workflow_builds_a_distinct_artifact_for_each_unpublished_release_version() -> None:
     workflow = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
 
-    assert 'docker buildx imagetools create --tag "ghcr.io/bcl1713/lifeos:$VERSION"' in workflow
+    assert "steps.immutable_tags.outputs.version_unpublished == 'true'" in workflow
     assert "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}" in workflow
+    assert "package_version: ${{ steps.release.outputs.package_version }}" in workflow
+    assert "LIFEOS_PACKAGE_VERSION=${{ needs.verify.outputs.package_version }}" in workflow
+    assert 'docker buildx imagetools create --tag "ghcr.io/bcl1713/lifeos:$VERSION"' not in workflow
+    assert "version_revision" in workflow
+    assert "version_label" in workflow
+    assert "refusing to use existing image tag" in workflow
