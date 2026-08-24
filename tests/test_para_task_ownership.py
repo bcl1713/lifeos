@@ -13,6 +13,7 @@ from lifeos.wiki_store import WikiRepository
 
 def _client(tmp_path: Path) -> tuple[TestClient, Path]:
     wiki = tmp_path / "wiki"
+    wiki.mkdir()
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",

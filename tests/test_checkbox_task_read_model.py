@@ -107,6 +107,54 @@ def test_today_and_tasks_render_checkbox_observations_without_projection_rows_or
         assert "Checkbox state is read-only in LifeOS" in page.text
 
 
+def test_authenticated_checkbox_read_pages_render_recovery_state_when_wiki_is_not_configured(tmp_path: Path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'unconfigured.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+
+    for path, heading in (("/", "Today"), ("/tasks", "Tasks")):
+        response = client.get(path)
+
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("text/html")
+        assert f"<title>{heading} unavailable · LifeOS</title>" in response.text
+        assert f"{heading} is temporarily unavailable</h1>" in response.text
+        assert "The canonical wiki repository has not been configured." in response.text
+        assert "Configure the canonical wiki repository, then refresh this page." in response.text
+        assert 'href="/tasks"' in response.text
+        assert "Canonical wiki repository is not configured" not in response.text
+
+    api_response = client.get("/api/v1/checkbox-tasks")
+    assert api_response.status_code == 503
+    assert api_response.headers["content-type"].startswith("application/json")
+    assert api_response.json() == {"detail": "Canonical wiki repository is not configured"}
+
+
+def test_authenticated_checkbox_read_pages_distinguish_unavailable_wiki_from_empty_scan(tmp_path: Path) -> None:
+    unavailable_wiki = tmp_path / "unavailable-wiki"
+    client = _client(tmp_path, unavailable_wiki)
+
+    for path, heading in (("/", "Today"), ("/tasks", "Tasks")):
+        response = client.get(path)
+
+        assert response.status_code == 503
+        assert response.headers["content-type"].startswith("text/html")
+        assert f"{heading} is temporarily unavailable</h1>" in response.text
+        assert "LifeOS cannot reach the configured canonical wiki repository." in response.text
+        assert "Check that the canonical wiki repository is available, then refresh this page." in response.text
+        assert "No checkbox observations in approved wiki sources." not in response.text
+
+    api_response = client.get("/api/v1/checkbox-tasks")
+    assert api_response.status_code == 503
+    assert api_response.headers["content-type"].startswith("application/json")
+    assert api_response.json() == {"detail": "Canonical wiki repository is unavailable"}
+
+
 def test_unsafe_link_is_not_clickable_and_is_reported_in_api_and_html(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "index.md"

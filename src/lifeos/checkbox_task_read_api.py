@@ -19,6 +19,18 @@ from lifeos.wiki_store import WikiRepository
 
 router = APIRouter(prefix="/api/v1")
 
+CANONICAL_WIKI_NOT_CONFIGURED = "Canonical wiki repository is not configured"
+CANONICAL_WIKI_UNAVAILABLE = "Canonical wiki repository is unavailable"
+
+
+def canonical_wiki_unavailability_detail(repository: WikiRepository | None) -> str | None:
+    """Return a safe availability diagnosis without reading or modifying the wiki."""
+    if repository is None:
+        return CANONICAL_WIKI_NOT_CONFIGURED
+    if repository.root.is_symlink() or not repository.root.is_dir():
+        return CANONICAL_WIKI_UNAVAILABLE
+    return None
+
 
 def _link(path: str, repository: WikiRepository) -> dict[str, str | None]:
     resolved = resolve_wiki_link(
@@ -85,6 +97,8 @@ def _diagnostic(diagnostic: CheckboxTaskDiagnostic, repository: WikiRepository) 
 
 def checkbox_task_read_model(repository: WikiRepository) -> dict[str, object]:
     """Produce the UI/API DTO exclusively from the canonical wiki scanner."""
+    if detail := canonical_wiki_unavailability_detail(repository):
+        raise HTTPException(status_code=503, detail=detail)
     result: CheckboxTaskScanResult = scan_checkbox_tasks(repository.root)
     return {
         "tasks": [_task(task, repository) for task in result.tasks],
@@ -98,8 +112,9 @@ def checkbox_task_read_model(repository: WikiRepository) -> dict[str, object]:
 
 def get_checkbox_task_read_model(request: Request) -> dict[str, object]:
     repository: WikiRepository | None = request.app.state.wiki_repository
-    if repository is None:
-        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
+    if detail := canonical_wiki_unavailability_detail(repository):
+        raise HTTPException(status_code=503, detail=detail)
+    assert repository is not None
     return checkbox_task_read_model(repository)
 
 

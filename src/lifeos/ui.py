@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from lifeos.checkbox_task_read_api import checkbox_task_read_model
+from lifeos.checkbox_task_read_api import canonical_wiki_unavailability_detail, checkbox_task_read_model
 from lifeos.context_api import ProjectCreate, create_project
 from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
 from lifeos.legacy_retirement import raise_legacy_domain_retired
@@ -77,9 +77,15 @@ def render_tasks(
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
     repository: WikiRepository | None = session.info.get("wiki_repository")
-    if repository is None:
-        raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
-    model = checkbox_task_read_model(repository)
+    if detail := canonical_wiki_unavailability_detail(repository):
+        return render_checkbox_task_recovery(request, username, all_tasks=all_tasks, detail=detail)
+    assert repository is not None
+    try:
+        model = checkbox_task_read_model(repository)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise
+        return render_checkbox_task_recovery(request, username, all_tasks=all_tasks, detail=str(exc.detail))
     tasks = model["tasks"]
     assert isinstance(tasks, list)
     if not all_tasks:
@@ -96,6 +102,28 @@ def render_tasks(
             "today": date.today(),
         },
         status_code=status_code,
+    )
+
+
+def render_checkbox_task_recovery(
+    request: Request, username: str, *, all_tasks: bool, detail: str
+) -> HTMLResponse:
+    if detail == "Canonical wiki repository is not configured":
+        message = "The canonical wiki repository has not been configured."
+        guidance = "Configure the canonical wiki repository, then refresh this page."
+    else:
+        message = "LifeOS cannot reach the configured canonical wiki repository."
+        guidance = "Check that the canonical wiki repository is available, then refresh this page."
+    return templates.TemplateResponse(
+        request=request,
+        name="checkbox_task_recovery.html",
+        context={
+            "username": username,
+            "page_name": "Tasks" if all_tasks else "Today",
+            "message": message,
+            "guidance": guidance,
+        },
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     )
 
 

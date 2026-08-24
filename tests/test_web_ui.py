@@ -6,11 +6,13 @@ from lifeos.main import create_app
 
 
 def _app(tmp_path: Path):
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
     return create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
         auth_password="password",
-        wiki_root=str(tmp_path / "wiki"),
+        wiki_root=str(wiki),
         scheduler_enabled=False,
     )
 
