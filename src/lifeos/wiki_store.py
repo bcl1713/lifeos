@@ -27,16 +27,20 @@ def normalize_task_notes(value: str | None) -> str | None:
 
 
 def task_summary_body(title: str, notes: str | None) -> str:
-    """Render task descriptive content in its canonical Markdown Summary section."""
+    """Render task prose as the terminal canonical Markdown Summary section."""
     normalized_notes = normalize_task_notes(notes)
     body = f"# {title}"
     return f"{body}\n\n## Summary\n\n{normalized_notes}" if normalized_notes else body
 
 
 def task_notes(record: "WikiRecord") -> str | None:
-    """Read task prose from canonical Summary content, with legacy metadata fallback."""
+    """Read terminal canonical Summary prose, with legacy metadata fallback.
+
+    Generated task documents reserve all content following ``## Summary`` for
+    task prose, so submitted Markdown may itself contain level-two headings.
+    """
     summary = re.search(
-        r"^## Summary[ \t]*\n(?P<content>.*?)(?=^## [^\n]+|\Z)", record.body, flags=re.MULTILINE | re.DOTALL
+        r"^## Summary[ \t]*\n(?P<content>.*)\Z", record.body, flags=re.MULTILINE | re.DOTALL
     )
     if summary is not None:
         canonical_notes = normalize_task_notes(summary.group("content"))
