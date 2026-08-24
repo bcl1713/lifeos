@@ -13,6 +13,7 @@ from lifeos.wiki_store import WikiRepository
 
 def _client(tmp_path: Path) -> tuple[TestClient, Path]:
     wiki = tmp_path / "wiki"
+    wiki.mkdir()
     app = create_app(
         database_url=f"sqlite:///{tmp_path / 'lifeos.db'}",
         auth_username="brian",
@@ -175,124 +176,15 @@ def test_task_edits_preserve_existing_path_and_reject_owner_reassignment(tmp_pat
     assert reassigned.json()["detail"] == "task owner changes require the controlled relocation workflow"
 
 
-def test_task_ui_selects_canonical_owners_and_displays_owner_and_source_path(tmp_path: Path) -> None:
+def test_task_ui_fences_projected_task_owner_controls(tmp_path: Path) -> None:
     client, _wiki = _client(tmp_path)
-    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
-    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
-
-    page = client.get("/")
-    assert 'name="task_owner"' in page.text
-    assert f'value="project:{project["wiki_id"]}"' in page.text
-    assert project["wiki_id"] in page.text
-
-    created = client.post(
-        "/ui/tasks",
-        data={
-            "title": "Book contractor",
-            "task_list_id": str(task_list["id"]),
-            "task_owner": f'project:{project["wiki_id"]}',
-        },
-    )
-    assert created.status_code == 200
-    rendered = client.get("/").text
-    assert "Owner: Project · " + project["wiki_id"] in rendered
-    assert "Source: 01-Projects/renovate-kitchen/tasks/book-contractor-tsk-book-contractor.md" in rendered
-
-
-def test_task_ui_makes_para_ownership_and_canonical_source_navigation_explicit(tmp_path: Path) -> None:
-    client, _wiki = _client(tmp_path)
-    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
-
     page = client.get("/")
 
-    assert '<fieldset class="task-owner">' in page.text
-    assert "<legend>Task owner</legend>" in page.text
-    assert "Choose Inbox for untriaged work, or select the canonical Project or Area that owns this task." in page.text
-    assert "Daily-capture proposals are reviewed separately and do not create tasks until approved." in page.text
-    assert f'value="project:{project["wiki_id"]}"' in page.text
-
-    created = client.post(
-        "/ui/tasks",
-        data={
-            "title": "Book contractor",
-            "task_list_id": "1",
-            "task_owner": f'project:{project["wiki_id"]}',
-        },
-    )
-
-    assert created.status_code == 200
-    rendered = client.get("/").text
-    assert (
-        'href="/sources/wiki/01-Projects/renovate-kitchen/tasks/book-contractor-tsk-book-contractor.md"'
-        in rendered
-    )
-    assert ">Open canonical task source<" in rendered
-
-
-def test_task_ui_uses_type_safe_owner_choices_and_recovers_a_forged_mismatch(tmp_path: Path) -> None:
-    client, _wiki = _client(tmp_path)
-    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
-    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
-    area = client.post("/api/areas", json={"title": "House"}).json()
-
-    page = client.get("/")
-    assert f'value="project:{project["wiki_id"]}"' in page.text
-    assert f'value="area:{area["id"]}"' in page.text
-    assert 'value="inbox"' in page.text
-    assert 'name="owner_type"' not in page.text
-    assert 'name="owner_wiki_id"' not in page.text
-
-    project_task = client.post(
-        "/ui/tasks",
-        data={"title": "Book contractor", "task_list_id": str(task_list["id"]), "task_owner": f'project:{project["wiki_id"]}'},
-    )
-    assert project_task.status_code == 200
-    assert "Owner: Project · " + project["wiki_id"] in client.get("/").text
-
-    area_task = client.post(
-        "/ui/tasks",
-        data={"title": "Replace filter", "task_list_id": str(task_list["id"]), "task_owner": f'area:{area["id"]}'},
-    )
-    assert area_task.status_code == 200
-    assert "Owner: Area · " + area["id"] in client.get("/").text
-
-    recovered = client.post(
-        "/ui/tasks",
-        data={
-            "title": "Preserve this task",
-            "task_list_id": str(task_list["id"]),
-            "task_owner": f'project:{area["id"]}',
-            "due_date": "2026-08-25",
-            "notes": "Keep these notes",
-        },
-    )
-    assert recovered.status_code == 422
-    assert "We could not match that owner" in recovered.text
-    assert 'role="alert"' in recovered.text
-    assert 'aria-invalid="true"' in recovered.text
-    assert 'value="Preserve this task"' in recovered.text
-    assert 'value="2026-08-25"' in recovered.text
-    assert "Keep these notes" in recovered.text
-    assert f'value="project:{area["id"]}" selected' in recovered.text
-    assert "task owner does not resolve" not in recovered.text
-
-
-def test_task_views_keep_rendering_when_a_projected_source_path_is_unsafe(tmp_path: Path) -> None:
-    client, _wiki = _client(tmp_path)
-    client.get("/")
-    task = client.post("/api/tasks", json={"title": "Unsafe projection", "task_list_id": 1}).json()
-
-    with client.app.state.session_factory() as session:
-        projected = session.get(Task, task["id"])
-        assert projected is not None
-        projected.wiki_path = "../outside.md"
-        session.commit()
-
-    for path in ("/", "/tasks"):
-        response = client.get(path)
-        assert response.status_code == 200
-        assert "Source: ../outside.md" in response.text
-        assert "Open canonical task source" not in response.text
+    assert page.status_code == 200
+    assert 'name="task_owner"' not in page.text
+    assert '<fieldset class="task-owner">' not in page.text
+    assert "/ui/tasks/" not in page.text
+    assert "Checkbox state is read-only in LifeOS" in page.text
 
 
 def test_projection_round_trip_keeps_owner_and_rejects_invalid_owner_type(tmp_path: Path) -> None:

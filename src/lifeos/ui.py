@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from lifeos.checkbox_task_read_api import canonical_wiki_unavailability_detail, checkbox_task_read_model
 from lifeos.context_api import ProjectCreate, create_project
 from lifeos.domain import AuditRecord, Goal, MetricDefinition, MetricEntry, Project, Routine, Task, TaskList, utcnow
 from lifeos.legacy_retirement import raise_legacy_domain_retired
@@ -75,39 +76,20 @@ def render_tasks(
     task_form_error: str | None = None,
     status_code: int = status.HTTP_200_OK,
 ) -> HTMLResponse:
-    ensure_default_list(session)
-    query = select(Task).order_by(Task.due_date.is_(None), Task.due_date, Task.id)
-    if not all_tasks:
-        query = query.where(Task.status == "open")
-    tasks = list(session.scalars(query))
-    task_tags = {task.id: normalize_task_tags(task.tags) for task in tasks}
-    task_lists = list(session.scalars(select(TaskList).order_by(TaskList.name)))
-    if task_form is None:
-        task_form = {
-            "title": "",
-            "task_list_id": str(task_lists[0].id),
-            "notes": "",
-            "due_date": "",
-            "task_owner": "inbox",
-        }
     repository: WikiRepository | None = session.info.get("wiki_repository")
-    task_owners = [] if repository is None else sorted(
-        repository.list_records("project") + repository.list_records("area"),
-        key=lambda record: (record.record_type, record.title),
-    )
-    task_sources = {}
-    if repository is not None:
-        for task in tasks:
-            if not task.wiki_path:
-                continue
-            try:
-                task_sources[task.id] = resolve_wiki_link(
-                    task.wiki_path,
-                    repository.root,
-                    silverbullet_base_url=os.getenv("LIFEOS_SILVERBULLET_BASE_URL"),
-                )
-            except HTTPException:
-                continue
+    if detail := canonical_wiki_unavailability_detail(repository):
+        return render_checkbox_task_recovery(request, username, all_tasks=all_tasks, detail=detail)
+    assert repository is not None
+    try:
+        model = checkbox_task_read_model(repository)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_503_SERVICE_UNAVAILABLE:
+            raise
+        return render_checkbox_task_recovery(request, username, all_tasks=all_tasks, detail=str(exc.detail))
+    tasks = model["tasks"]
+    assert isinstance(tasks, list)
+    if not all_tasks:
+        tasks = [task for task in tasks if not task["checked"]]
     template = "tasks.html" if all_tasks else "today.html"
     return templates.TemplateResponse(
         request=request,
@@ -115,15 +97,33 @@ def render_tasks(
         context={
             "username": username,
             "tasks": tasks,
-            "task_tags": task_tags,
-            "task_lists": task_lists,
-            "task_owners": task_owners,
-            "task_sources": task_sources,
-            "task_form": task_form,
-            "task_form_error": task_form_error,
+            "diagnostics": model["diagnostics"],
+            "policy": model["policy"],
             "today": date.today(),
         },
         status_code=status_code,
+    )
+
+
+def render_checkbox_task_recovery(
+    request: Request, username: str, *, all_tasks: bool, detail: str
+) -> HTMLResponse:
+    if detail == "Canonical wiki repository is not configured":
+        message = "The canonical wiki repository has not been configured."
+        guidance = "Configure the canonical wiki repository, then refresh this page."
+    else:
+        message = "LifeOS cannot reach the configured canonical wiki repository."
+        guidance = "Check that the canonical wiki repository is available, then refresh this page."
+    return templates.TemplateResponse(
+        request=request,
+        name="checkbox_task_recovery.html",
+        context={
+            "username": username,
+            "page_name": "Tasks" if all_tasks else "Today",
+            "message": message,
+            "guidance": guidance,
+        },
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
     )
 
 
@@ -230,7 +230,9 @@ def create_ui_task(
                 "due_date": due_date,
                 "task_owner": task_owner,
             },
-            task_form_error="We could not match that owner. Choose a Project or Area from the Task owner list and try again.",
+            task_form_error=(
+                "We could not match that owner. Choose a Project or Area from the Task owner list and try again."
+            ),
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         )
     return RedirectResponse("/", status_code=status.HTTP_303_SEE_OTHER)

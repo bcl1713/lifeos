@@ -2,13 +2,20 @@
 {% block title %}Tasks · LifeOS{% endblock %}
 {% block content %}
 <h1>Tasks</h1>
-<p class="muted">All task records, including completed history.</p>
+<p class="muted">All checkbox observations from approved wiki sources, in deterministic source order.</p>
 <section class="card">
-{% if tasks %}{% for task in tasks %}
-<div class="task">
-  {% if task.status == 'completed' %}<form method="post" action="/ui/tasks/{{ task.id }}/reopen"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="secondary" type="submit">Reopen</button></form>{% elif task.status in ['paused', 'cancelled', 'archived'] %}<form method="post" action="/ui/tasks/{{ task.id }}/reopen"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="secondary" type="submit">Reopen</button></form>{% else %}<form method="post" action="/ui/tasks/{{ task.id }}/complete"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="complete" type="submit">Done</button></form><form method="post" action="/ui/tasks/{{ task.id }}/pause"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="secondary" type="submit">Pause</button></form><form method="post" action="/ui/tasks/{{ task.id }}/archive"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="secondary" type="submit">Archive</button></form>{% endif %}
-  <div class="task-title"><strong>{{ task.title }}</strong><span class="muted">{{ task.status|title }}{% if task.priority %} · priority {{ task.priority }}{% endif %}{% if task.due_date %} · due {{ task.due_date }}{% endif %}</span>{% set tags = task_tags.get(task.id, []) %}{% if tags %}<ul class="task-tags" aria-label="Tags">{% for tag in tags %}<li class="tag-chip">{{ tag }}</li>{% endfor %}</ul>{% endif %}{% if task.owner_type %}<div class="muted">Owner: {{ task.owner_type|title }}{% if task.owner_wiki_id %} · {{ task.owner_wiki_id }}{% endif %}</div>{% endif %}{% set source = task_sources.get(task.id) %}{% if source and source.link_status == 'valid' %}<div class="muted">Source: {{ source.path }} · <a href="{{ source.canonical_url }}">Open canonical task source</a></div>{% elif task.wiki_path %}<div class="muted">Source: {{ task.wiki_path }}</div>{% endif %}{% if task.source_ref %}<div class="muted">Source reference: {{ task.source_ref }}</div>{% endif %}{% if task.notes %}<div class="muted">{{ task.notes }}</div>{% endif %}</div>
-</div>
-{% endfor %}{% else %}<p class="empty">No tasks yet.</p>{% endif %}
+  <p class="muted">Checkbox state is read-only in LifeOS. Update the approved checklist source directly; this view never changes a checkbox.</p>
+  {% if tasks %}{% for task in tasks %}
+  <article class="task checkbox-task">
+    <input type="checkbox" disabled aria-label="{{ 'Checked' if task.checked else 'Open' }}: {{ task.label }}"{% if task.checked %} checked{% endif %}>
+    <div class="task-title">
+      <strong>{{ task.label }}</strong><span class="muted">{{ 'Checked' if task.checked else 'Open' }}</span>
+      <div class="muted">Checklist source: {{ task.source.path }}:{{ task.source.line }}:{{ task.source.column }}{% if task.source.url %} · <a href="{{ task.source.url }}">Open checklist source</a>{% else %} · {{ task.source.diagnostic }}{% endif %}</div>
+      <div class="muted">{{ task.source.excerpt }}</div>
+      {% if task.linked_record %}<div class="muted">Linked task record: {{ task.linked_record.path }}{% if task.linked_record.url %} · <a href="{{ task.linked_record.url }}">Open linked task record</a>{% else %} · {{ task.linked_record.diagnostic }}{% endif %}{% if task.linked_record.summary %} · {{ task.linked_record.summary }}{% endif %}{% if task.linked_record.priority is not none %} · priority {{ task.linked_record.priority }}{% endif %}</div>{% endif %}
+    </div>
+  </article>
+  {% endfor %}{% else %}<p class="empty">No checkbox observations in approved wiki sources.</p>{% endif %}
 </section>
+{% if diagnostics %}<section class="card" aria-labelledby="checkbox-diagnostics"><h2 id="checkbox-diagnostics">Scanner diagnostics</h2>{% for diagnostic in diagnostics %}<div class="diagnostic"><strong>{{ diagnostic.code }}</strong>: {{ diagnostic.message }} <span class="muted">{{ diagnostic.source.path }}:{{ diagnostic.source.line }}:{{ diagnostic.source.column }}</span></div>{% endfor %}</section>{% endif %}
 {% endblock %}

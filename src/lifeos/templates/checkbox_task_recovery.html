@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ page_name }} unavailable · LifeOS{% endblock %}
+{% block content %}
+<section class="card" aria-labelledby="checkbox-task-recovery">
+  <h1 id="checkbox-task-recovery">{{ page_name }} is temporarily unavailable</h1>
+  <p>{{ message }}</p>
+  <p class="muted">{{ guidance }}</p>
+</section>
+{% endblock %}

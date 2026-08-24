@@ -69,7 +69,7 @@ def test_task_notes_are_canonical_summary_content_for_api_and_detail_view(tmp_pa
     assert "notes:" not in source
     assert "## Summary\n\nKeep this canonical prose." in source
     assert client.get("/api/tasks").json()[0]["notes"] == "Keep this canonical prose."
-    assert "Keep this canonical prose." in client.get("/tasks").text
+    assert "Keep this canonical prose." not in client.get("/tasks").text
 
 
 def test_nested_heading_task_notes_survive_projection_rebuild(tmp_path: Path) -> None:
@@ -101,7 +101,7 @@ def test_nested_heading_task_notes_survive_projection_rebuild(tmp_path: Path) ->
 
     rebuilt_task = client.get("/api/tasks").json()[0]
     assert rebuilt_task["notes"] == notes
-    assert notes in client.get("/tasks").text
+    assert notes not in client.get("/tasks").text
 
 
 def test_empty_task_notes_do_not_create_an_empty_summary_placeholder(tmp_path: Path) -> None:
