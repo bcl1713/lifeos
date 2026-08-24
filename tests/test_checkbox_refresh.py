@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+
 from lifeos.checkbox_refresh import CheckboxRefreshCoordinator, WatchdogCheckboxRefreshWatcher
 from lifeos.wiki_checkbox_tasks import scan_checkbox_tasks
 
@@ -84,15 +86,64 @@ def test_watcher_event_bursts_debounce_to_one_requested_scan(tmp_path: Path) -> 
     asyncio.run(run())
 
 
-def test_disabled_or_unavailable_watcher_never_prevents_periodic_reconciliation(tmp_path: Path) -> None:
+@pytest.mark.parametrize("unavailable_error", (ImportError, OSError))
+def test_unavailable_watcher_never_prevents_periodic_reconciliation(
+    tmp_path: Path, unavailable_error: type[Exception]
+) -> None:
     wiki = tmp_path / "wiki"
-    _write_checkbox(wiki, "dailies/today.md", "- [ ] observe\n")
-    coordinator = CheckboxRefreshCoordinator(wiki, interval_seconds=60)
-    watcher = WatchdogCheckboxRefreshWatcher(wiki, enabled=False)
+    source = _write_checkbox(wiki, "dailies/today.md", "- [ ] observe\n")
+    source_before = source.read_bytes()
+    coordinator = CheckboxRefreshCoordinator(wiki, interval_seconds=0.01)
+    watcher = WatchdogCheckboxRefreshWatcher(
+        wiki,
+        enabled=True,
+        observer_factory=lambda handler, root: (_ for _ in ()).throw(unavailable_error()),
+    )
 
     assert watcher.start(coordinator.request_refresh) is False
-    assert watcher.diagnostic == "disabled"
-    assert coordinator.refresh_once() == scan_checkbox_tasks(wiki)
+    assert watcher.diagnostic == f"unavailable: {unavailable_error.__name__}"
+
+    async def run() -> None:
+        task = asyncio.create_task(coordinator.run())
+        try:
+            await asyncio.sleep(0.04)
+        finally:
+            await coordinator.stop()
+            await task
+
+    asyncio.run(run())
+
+    assert coordinator.refresh_count >= 2
+    assert coordinator.last_result == scan_checkbox_tasks(wiki)
+    assert source.read_bytes() == source_before
+
+
+def test_restarted_coordinator_immediately_scans_current_wiki_state_after_prior_stop(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    source = _write_checkbox(wiki, "dailies/today.md", "- [ ] before restart\n")
+    first = CheckboxRefreshCoordinator(wiki, interval_seconds=60)
+
+    async def scan_and_stop(coordinator: CheckboxRefreshCoordinator) -> None:
+        task = asyncio.create_task(coordinator.run())
+        try:
+            while coordinator.last_result is None:
+                await asyncio.sleep(0)
+        finally:
+            await coordinator.stop()
+            await task
+
+    asyncio.run(scan_and_stop(first))
+    assert first.last_result is not None
+    assert [(task.checked, task.label) for task in first.last_result.tasks] == [(False, "before restart")]
+
+    source.write_text("- [x] after restart\n", encoding="utf-8")
+    source_before_second_scan = source.read_bytes()
+    second = CheckboxRefreshCoordinator(wiki, interval_seconds=60)
+    asyncio.run(scan_and_stop(second))
+
+    assert second.last_result is not None
+    assert [(task.checked, task.label) for task in second.last_result.tasks] == [(True, "after restart")]
+    assert source.read_bytes() == source_before_second_scan
 
 
 def test_watcher_overflow_requests_the_same_debounced_scan(tmp_path: Path) -> None:
