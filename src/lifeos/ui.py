@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import date
 from pathlib import Path
@@ -53,6 +54,17 @@ def ensure_default_list(session: Session) -> TaskList:
     return item
 
 
+def normalize_task_tags(tags: object) -> list[str]:
+    if isinstance(tags, str):
+        try:
+            tags = json.loads(tags)
+        except json.JSONDecodeError:
+            return []
+    if not isinstance(tags, list):
+        return []
+    return [tag for tag in tags if isinstance(tag, str)]
+
+
 def render_tasks(
     request: Request,
     username: str,
@@ -68,6 +80,7 @@ def render_tasks(
     if not all_tasks:
         query = query.where(Task.status == "open")
     tasks = list(session.scalars(query))
+    task_tags = {task.id: normalize_task_tags(task.tags) for task in tasks}
     task_lists = list(session.scalars(select(TaskList).order_by(TaskList.name)))
     if task_form is None:
         task_form = {
@@ -102,6 +115,7 @@ def render_tasks(
         context={
             "username": username,
             "tasks": tasks,
+            "task_tags": task_tags,
             "task_lists": task_lists,
             "task_owners": task_owners,
             "task_sources": task_sources,
