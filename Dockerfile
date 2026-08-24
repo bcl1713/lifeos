@@ -25,7 +25,7 @@ RUN python scripts/embed_build_metadata.py \
         --package-version "$LIFEOS_PACKAGE_VERSION" \
         --build-version "$LIFEOS_BUILD_VERSION" \
         --build-revision "$LIFEOS_BUILD_REVISION" \
-    && pip install --no-cache-dir . \
+    && pip install --no-cache-dir '.[watch]' \
     && chmod 755 /usr/local/bin/lifeos-entrypoint \
     && mkdir -p /data \
     && chown -R lifeos:lifeos /app /data
