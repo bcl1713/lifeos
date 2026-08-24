@@ -52,6 +52,25 @@ Tasks—including dependencies, parentage, recurrence/occurrence identity, statu
 
 `scripts/sync_wiki_projection.py --check` is the non-mutating reconciliation gate. It reports missing and orphaned projections, duplicate identities and paths, stale hashes, type/path conflicts, missing identities, and invalid source links. A writable sync must refuse ambiguous canonical identities before mutating SQLite.
 
+## Task descriptive-content contract
+
+For Task create and update requests, the optional API `notes` input is persisted
+as the terminal canonical Markdown `## Summary` body. The canonical Summary body
+is the durable authority for task descriptive prose; it is not mirrored into a
+second writable notes field in new canonical task records. Task API reads,
+projection rebuilds, and Task detail rendering all derive the displayed notes
+from that same canonical content.
+
+The entire body following `## Summary` belongs to the Task's descriptive prose.
+It may include Markdown structure, including nested level-two headings, and must
+survive a projection rebuild unchanged. Missing, empty, or whitespace-only API
+notes do not create an empty `## Summary` placeholder.
+
+Older canonical Task records that store `notes` in frontmatter remain readable as
+a compatibility fallback. This is a read-compatibility rule, not authorization
+for a bulk rewrite of existing wiki records; normal reconciliation does not need
+to rewrite legacy records merely to make their notes visible.
+
 ## Daily-capture scan boundary
 
 `scripts/scan_daily_captures.py` is a review-only reader of an explicit daily-note
