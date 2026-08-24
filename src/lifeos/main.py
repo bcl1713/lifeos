@@ -11,9 +11,11 @@ from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.metric_api import router as metric_router
 from lifeos.scheduler import scheduler_lifespan
-from lifeos.source_api import router as source_router, view_router as source_view_router
+from lifeos.source_api import router as source_router
+from lifeos.source_api import view_router as source_view_router
 from lifeos.task_api import router as task_router
 from lifeos.ui import router as ui_router
+from lifeos.wiki_checkbox_tasks import CheckboxTaskScanPolicy
 from lifeos.wiki_context_api import router as wiki_context_router
 
 _SESSION_COOKIE = "lifeos_session"
@@ -32,6 +34,9 @@ def create_app(
     agent_token: str | None = None,
     scheduler_enabled: bool | None = None,
     scheduler_interval_seconds: int | None = None,
+    checkbox_refresh_interval_seconds: float | None = None,
+    checkbox_refresh_debounce_seconds: float | None = None,
+    checkbox_watcher_enabled: bool | None = None,
     wiki_root: str | None = None,
     build_version: str | None = None,
     build_revision: str | None = None,
@@ -41,34 +46,45 @@ def create_app(
     initialize_database(engine)
     session_factory = create_session_factory(engine)
     auth = AuthService(session_factory)
-
     username = auth_username or os.getenv("LIFEOS_USERNAME")
     password = auth_password or os.getenv("LIFEOS_PASSWORD")
     if username and password:
         auth.ensure_user(username, password)
-
     configured_agent_token = agent_token or os.getenv("LIFEOS_AGENT_TOKEN")
     if configured_agent_token:
         auth.ensure_agent(configured_agent_token)
-
     scheduler_enabled = (
         scheduler_enabled if scheduler_enabled is not None else os.getenv("LIFEOS_SCHEDULER_ENABLED", "1") == "1"
     )
     scheduler_interval_seconds = scheduler_interval_seconds or int(
         os.getenv("LIFEOS_SCHEDULER_INTERVAL_SECONDS", "900")
     )
+    checkbox_refresh_interval_seconds = checkbox_refresh_interval_seconds or float(
+        os.getenv("LIFEOS_CHECKBOX_REFRESH_INTERVAL_SECONDS", str(scheduler_interval_seconds))
+    )
+    checkbox_refresh_debounce_seconds = checkbox_refresh_debounce_seconds or float(
+        os.getenv("LIFEOS_CHECKBOX_REFRESH_DEBOUNCE_SECONDS", "1")
+    )
+    checkbox_watcher_enabled = (
+        checkbox_watcher_enabled
+        if checkbox_watcher_enabled is not None
+        else os.getenv("LIFEOS_CHECKBOX_WATCHER_ENABLED", "0") == "1"
+    )
+    checkbox_scan_exclusions = tuple(
+        item.strip() for item in os.getenv("LIFEOS_CHECKBOX_SCAN_EXCLUSIONS", "").split(",") if item.strip()
+    )
     build_version = build_version or BUILD_VERSION
     build_revision = build_revision or BUILD_REVISION
-    app = FastAPI(
-        title="LifeOS",
-        version=__version__,
-        lifespan=scheduler_lifespan if scheduler_enabled else None,
-    )
+    app = FastAPI(title="LifeOS", version=__version__, lifespan=scheduler_lifespan if scheduler_enabled else None)
     app.state.engine = engine
     app.state.auth = auth
     app.state.session_factory = session_factory
     app.state.scheduler_timezone = os.getenv("LIFEOS_TIMEZONE", "America/Chicago")
     app.state.scheduler_interval_seconds = scheduler_interval_seconds
+    app.state.checkbox_refresh_interval_seconds = checkbox_refresh_interval_seconds
+    app.state.checkbox_refresh_debounce_seconds = checkbox_refresh_debounce_seconds
+    app.state.checkbox_watcher_enabled = checkbox_watcher_enabled
+    app.state.checkbox_scan_policy = CheckboxTaskScanPolicy(exclusions=checkbox_scan_exclusions)
     from lifeos.wiki_store import WikiRepository
 
     configured_wiki_root = wiki_root or os.getenv("LIFEOS_WIKI_ROOT")
