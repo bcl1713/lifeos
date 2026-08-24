@@ -7,6 +7,7 @@ import pytest
 from scripts.validate_release_policy import (
     derive_dev_version,
     derive_package_version,
+    package_version,
     validate_release,
     validate_repository,
 )
@@ -15,8 +16,8 @@ from scripts.validate_release_policy import (
 @pytest.mark.parametrize(
     ("version", "package_version"),
     [
-        ("v0.7.0-rc.1", "0.7.0"),
-        ("v12.34.56-rc.99", "12.34.56"),
+        ("v0.6.10-rc.1", "0.6.9"),
+        ("v12.34.56-rc.99", "12.34.55"),
     ],
 )
 def test_rc_release_accepts_matching_semver_prerelease(version: str, package_version: str) -> None:
@@ -33,7 +34,7 @@ def test_rc_release_rejects_final_and_malformed_versions(version: str) -> None:
 
 @pytest.mark.parametrize(
     ("version", "package_version"),
-    [("v0.7.0", "0.7.0"), ("v12.34.56", "12.34.56")],
+    [("v0.6.10", "0.6.9"), ("v12.34.56", "12.34.55")],
 )
 def test_stable_release_accepts_matching_final_semver(version: str, package_version: str) -> None:
     assert validate_release(version, package_version, "stable") == []
@@ -50,6 +51,17 @@ def test_stable_release_rejects_prerelease_and_malformed_versions(version: str) 
 def test_release_rejects_a_package_version_mismatch() -> None:
     assert validate_release("v0.7.0-rc.1", "0.7.1", "rc")
     assert validate_release("v0.7.0", "0.7.1", "stable")
+
+
+@pytest.mark.parametrize(
+    ("version", "mode"),
+    [("v0.6.3-rc.1", "rc"), ("v0.6.3", "stable")],
+)
+def test_release_accepts_the_next_artifact_identity_from_current_package_metadata(version: str, mode: str) -> None:
+    current_package_version = package_version(Path("pyproject.toml"))
+
+    assert current_package_version == "0.6.2"
+    assert validate_release(version, current_package_version, mode) == []
 
 
 def test_release_rejects_semver_core_numbers_with_leading_zeroes() -> None:

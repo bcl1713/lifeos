@@ -16,17 +16,22 @@ RUN_NUMBER = re.compile(r"^[1-9]\d*$")
 PACKAGE_VERSION = re.compile(rf'^version\s*=\s*"(?P<version>{SEMVER_CORE})"\s*$', re.MULTILINE)
 
 
-def derive_dev_version(package_version: str, run_number: str) -> str:
-    """Derive a unique, strict SemVer dev prerelease from package metadata."""
+def derive_next_release_version(package_version: str) -> str:
+    """Derive the next artifact's SemVer core from checked-in package metadata."""
     package_match = PACKAGE_SEMVER.fullmatch(package_version)
     if package_match is None:
         raise ValueError(f"invalid package version: {package_version}")
+    return (
+        f"{package_match.group('major')}.{package_match.group('minor')}"
+        f".{int(package_match.group('patch')) + 1}"
+    )
+
+
+def derive_dev_version(package_version: str, run_number: str) -> str:
+    """Derive a unique, strict SemVer dev prerelease from package metadata."""
     if RUN_NUMBER.fullmatch(run_number) is None:
         raise ValueError(f"invalid GitHub run number: {run_number}")
-    return (
-        f"v{package_match.group('major')}.{package_match.group('minor')}"
-        f".{int(package_match.group('patch')) + 1}-dev.{run_number}"
-    )
+    return f"v{derive_next_release_version(package_version)}-dev.{run_number}"
 
 
 def derive_package_version(build_version: str) -> str:
@@ -53,8 +58,12 @@ def validate_release(version: str, package_version: str, mode: str) -> list[str]
     if not match:
         expected = "vMAJOR.MINOR.PATCH-rc.N" if mode == "rc" else "vMAJOR.MINOR.PATCH"
         return [f"{mode} release version must match {expected}: {version}"]
-    if match.group("version") != package_version:
-        return [f"release version {version} does not match package version {package_version}"]
+    expected_release_version = derive_next_release_version(package_version)
+    if match.group("version") != expected_release_version:
+        return [
+            f"release version {version} does not match the next artifact version "
+            f"{expected_release_version} derived from package version {package_version}"
+        ]
     return []
 
 
