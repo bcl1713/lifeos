@@ -373,16 +373,44 @@ Deployment changes belong only in `bcl1713/homelab-stacks`. Before stateful chan
 | --- | --- | --- |
 | `status` | Liveness result (`ok` when the service responds normally). | Confirms the endpoint is live; it is not an artifact identifier. |
 | `service` | Service name (`lifeos`). | Identifies the responding service; it is not an artifact identifier. |
-| `package_version` | Static Python package metadata from the installed LifeOS package. The current package metadata is `0.6.2`. | Confirms the application package metadata, not the deployed image release. |
-| `build_version` | Immutable original build/release-channel version embedded when the image was built. | Compare with the inspected artifact's OCI version label. |
-| `build_revision` | Immutable source Git commit embedded when the image was built. | Compare with the inspected artifact's OCI revision label. |
+| `package_version` | PEP 440 Python package metadata embedded into the published artifact before installation. | Confirms the installed artifact package identity; it intentionally differs in syntax from dev/RC image versions. |
+| `build_version` | Immutable published release-channel version embedded when the image was built. | Compare with the inspected artifact's `org.opencontainers.image.version` label. |
+| `build_revision` | Immutable source Git commit embedded when the image was built. | Compare with the inspected artifact's `org.opencontainers.image.revision` label. |
 
-`build_version` is not a mutable deployment tag. For example, a later release
-alias may be attached to an existing image digest without rebuilding it; that
-artifact continues to report the original `build_version` and
-`build_revision`. Do not use `package_version`, `build_version`, or
-`build_revision` as evidence of which image reference the deployment was
-configured to use. Verify that reference separately.
+The checked-in `[project].version` is the base for deriving the next artifact;
+it is not necessarily the `package_version` returned by a published image.
+For a checked-in base version of `0.6.2`, the mappings are:
+
+| Published channel | `build_version` | `package_version` (PEP 440) |
+| --- | --- | --- |
+| Dev | `v0.6.3-dev.51` | `0.6.3.dev51` |
+| RC | `v0.6.3-rc.1` | `0.6.3rc1` |
+| Stable | `v0.6.3` | `0.6.3` |
+
+OCI labels mirror the immutable build fields exactly:
+
+| Runtime field | OCI label |
+| --- | --- |
+| `build_version` | `org.opencontainers.image.version` |
+| `build_revision` | `org.opencontainers.image.revision` |
+
+For example, an RC health response can look like this (the revision is the
+full commit SHA that built the image):
+
+```json
+{
+  "status": "ok",
+  "service": "lifeos",
+  "package_version": "0.6.3rc1",
+  "build_version": "v0.6.3-rc.1",
+  "build_revision": "<full-commit-sha>"
+}
+```
+
+Together, `build_version` and `build_revision` identify the deployed image's
+immutable build identity. They do not replace the configured image reference
+or its resolved digest: record and verify those separately, because a tag can
+move. A `package_version` alone is insufficient for deployed-image identity.
 
 ### Operator procedure
 
@@ -414,8 +442,8 @@ application credentials.
 
    Save the resolved `RepoDigest` together with the two OCI label values. The
    labels `org.opencontainers.image.version` and
-   `org.opencontainers.image.revision` identify the immutable build metadata
-   embedded in that artifact.
+   `org.opencontainers.image.revision` are the image-side values for the
+   runtime `build_version` and `build_revision` fields.
 
 3. Retrieve health data from the intended endpoint and compare only values from
    the same artifact:
@@ -427,7 +455,9 @@ application credentials.
    Confirm `status` is `ok` and `service` is `lifeos`. Confirm
    `build_version` exactly matches
    `org.opencontainers.image.version`, and `build_revision` exactly matches
-   `org.opencontainers.image.revision` from step 2. Record the configured
+   `org.opencontainers.image.revision` from step 2. The matching pair is the
+   deployed image's immutable build identity; the PEP 440 `package_version`
+   should also match the published channel mapping above. Record the configured
    image tag or digest separately from those comparisons. A mismatch means the
    endpoint and inspected artifact are not proven to be the same build and
    requires investigation before release acceptance or rollback completion.
