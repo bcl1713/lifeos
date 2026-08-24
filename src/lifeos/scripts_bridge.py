@@ -1,16 +1,26 @@
 """Bridge canonical wiki records into rebuildable LifeOS projections."""
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any
 
-import json
 from fastapi import HTTPException
 from sqlalchemy import select
 
-from lifeos.domain import Goal, GoalMilestone, Project, Routine, RoutineSkip, Task, TaskDependency, TaskList, WikiContextItem
+from lifeos.domain import (
+    Goal,
+    GoalMilestone,
+    Project,
+    Routine,
+    RoutineSkip,
+    Task,
+    TaskDependency,
+    TaskList,
+    WikiContextItem,
+)
 from lifeos.wiki_links import resolve_wiki_link
-from lifeos.wiki_store import WikiRepository, WikiRecord
+from lifeos.wiki_store import WikiRecord, WikiRepository, task_notes
 
 
 def _date(value: Any) -> date | None:
@@ -386,7 +396,7 @@ def sync_wiki_projection(session, repository: WikiRepository) -> dict[str, int]:
             item.title = record.title
             item.task_list_id = task_list.id
             item.status = str(_value(record, "status") or item.status)
-            item.notes = _value(record, "notes")
+            item.notes = task_notes(record)
             item.priority = int(_value(record, "priority") or item.priority or 0)
             tags = _value(record, "tags")
             if isinstance(tags, list):

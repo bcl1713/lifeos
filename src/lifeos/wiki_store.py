@@ -19,6 +19,32 @@ from ruamel.yaml.error import YAMLError
 _TYPED_PREFIX = {"project": "prj", "area": "area", "goal": "goal", "routine": "rtn", "task": "tsk"}
 
 
+def normalize_task_notes(value: str | None) -> str | None:
+    """Normalize optional task prose before storing it in canonical Markdown."""
+    if not isinstance(value, str):
+        return None
+    return value.strip() or None
+
+
+def task_summary_body(title: str, notes: str | None) -> str:
+    """Render task descriptive content in its canonical Markdown Summary section."""
+    normalized_notes = normalize_task_notes(notes)
+    body = f"# {title}"
+    return f"{body}\n\n## Summary\n\n{normalized_notes}" if normalized_notes else body
+
+
+def task_notes(record: "WikiRecord") -> str | None:
+    """Read task prose from canonical Summary content, with legacy metadata fallback."""
+    summary = re.search(
+        r"^## Summary[ \t]*\n(?P<content>.*?)(?=^## [^\n]+|\Z)", record.body, flags=re.MULTILINE | re.DOTALL
+    )
+    if summary is not None:
+        canonical_notes = normalize_task_notes(summary.group("content"))
+        if canonical_notes is not None:
+            return canonical_notes
+    return normalize_task_notes(record.fields.get("notes"))
+
+
 def _yaml() -> YAML:
     yaml = YAML(typ="rt")
     yaml.preserve_quotes = True
@@ -204,6 +230,7 @@ class WikiRepository:
         *,
         path: str | None = None,
         expected_hash: str | None = None,
+        remove_fields: tuple[str, ...] = (),
     ) -> WikiRecord:
         if record_type not in _TYPED_PREFIX:
             raise ValueError(f"unsupported wiki record type: {record_type}")
@@ -233,11 +260,13 @@ class WikiRepository:
             if not body:
                 body = existing_body
         values = existing_fields
+        for field in remove_fields:
+            values.pop(field, None)
         values.update({"schema_version": "1", "id": record_id, "type": record_type, "title": title})
         values.update(fields)
         values["updated"] = datetime.now(timezone.utc).date().isoformat()
         if not body:
-            body = f"# {title}\n\n## Summary\n\n"
+            body = f"# {title}" if record_type == "task" else f"# {title}\n\n## Summary\n\n"
         self._atomic_write(target, render_frontmatter(values, body))
         text = target.read_text(encoding="utf-8")
         record = WikiRecord(record_type, record_id, title, target.relative_to(self.root).as_posix(), values, body, hashlib.sha256(text.encode()).hexdigest())

@@ -11,7 +11,7 @@ import pytest
 from lifeos.db import create_engine, create_session_factory
 from lifeos.domain import AuditRecord, Task, TaskList
 from lifeos.google_tasks_migration import import_to_database, select_for_migration, to_lifeos_record
-from lifeos.wiki_store import WikiConflictError, WikiRepository
+from lifeos.wiki_store import WikiConflictError, WikiRepository, task_notes
 
 
 def test_migration_selects_open_and_recent_completed_records() -> None:
@@ -108,7 +108,9 @@ def test_staging_import_is_idempotent_and_audited(tmp_path) -> None:
     record = WikiRepository(wiki).find_by_id(task.wiki_id)
     assert record is not None
     assert record.fields["status"] == "open"
-    assert record.fields["notes"].startswith("Source: google-tasks:a:1")
+    notes = task_notes(record)
+    assert notes is not None
+    assert notes.startswith("Source: google-tasks:a:1")
     assert record.fields["task_list"] == "Inbox"
     assert record.fields["owner_type"] == "inbox"
     assert record.fields["owner_wiki_id"] is None
