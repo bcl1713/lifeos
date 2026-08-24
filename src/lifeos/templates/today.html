@@ -2,41 +2,21 @@
 {% block title %}Today · LifeOS{% endblock %}
 {% block content %}
 <h1>Today</h1>
-<p class="muted">{{ username }} · {{ today }}</p>
-<div class="grid">
-  <section class="card">
-    <h2>Open tasks</h2>
-    {% if tasks %}
-      {% for task in tasks %}
-      <div class="task">
-        <form method="post" action="/ui/tasks/{{ task.id }}/complete"><input type="hidden" name="expected_hash" value="{{ task.wiki_hash }}"><button class="complete" type="submit" aria-label="Complete {{ task.title }}">Done</button></form>
-        <div class="task-title"><strong>{{ task.title }}</strong>{% if task.priority %}<span class="muted">Priority {{ task.priority }}</span>{% endif %}{% if task.due_date %}<span class="muted {% if task.due_date < today %}overdue{% endif %}">Due {{ task.due_date }}</span>{% endif %}{% set tags = task_tags.get(task.id, []) %}{% if tags %}<ul class="task-tags" aria-label="Tags">{% for tag in tags %}<li class="tag-chip">{{ tag }}</li>{% endfor %}</ul>{% endif %}{% if task.owner_type %}<div class="muted">Owner: {{ task.owner_type|title }}{% if task.owner_wiki_id %} · {{ task.owner_wiki_id }}{% endif %}</div>{% endif %}{% set source = task_sources.get(task.id) %}{% if source and source.link_status == 'valid' %}<div class="muted">Source: {{ source.path }} · <a href="{{ source.canonical_url }}">Open canonical task source</a></div>{% elif task.wiki_path %}<div class="muted">Source: {{ task.wiki_path }}</div>{% endif %}{% if task.source_ref %}<div class="muted">Source reference: {{ task.source_ref }}</div>{% endif %}{% if task.notes %}<div class="muted">{{ task.notes }}</div>{% endif %}</div>
-      </div>
-      {% endfor %}
-    {% else %}<p class="empty">Nothing open for today. Civilization survives another morning.</p>{% endif %}
-  </section>
-  <section class="card">
-    <h2>Add direct task</h2>
-    <p class="muted">Direct tasks write canonical task sources. Daily-capture proposals are reviewed separately and do not create tasks until approved.</p>
-    <form method="post" action="/ui/tasks">
-      {% if task_form_error %}<div id="task-form-error" role="alert" tabindex="-1">{{ task_form_error }}</div>{% endif %}
-      <label for="title">Task</label><input id="title" name="title" maxlength="500" value="{{ task_form.title }}" required>
-      <label for="task_list_id">List</label><select id="task_list_id" name="task_list_id">{% for item in task_lists %}<option value="{{ item.id }}"{% if task_form.task_list_id == item.id|string %} selected{% endif %}>{{ item.name }}</option>{% endfor %}</select>
-      <fieldset class="task-owner">
-        <legend>Task owner</legend>
-        <p class="muted">Choose Inbox for untriaged work, or select the canonical Project or Area that owns this task.</p>
-        <label for="task_owner">Task owner</label><select id="task_owner" name="task_owner" required{% if task_form_error %} aria-describedby="task-form-error" aria-invalid="true"{% endif %}>
-          {% if task_form_error and task_form.task_owner != "inbox" %}<option value="{{ task_form.task_owner }}" selected disabled>Previously selected owner is unavailable — choose a valid Project or Area</option>{% endif %}
-          <option value="inbox"{% if task_form.task_owner == "inbox" %} selected{% endif %}>Inbox (no owner)</option>
-          <optgroup label="Projects">{% for owner in task_owners if owner.record_type == "project" %}<option value="project:{{ owner.record_id }}"{% if task_form.task_owner == "project:" ~ owner.record_id %} selected{% endif %}>{{ owner.title }}</option>{% endfor %}</optgroup>
-          <optgroup label="Areas">{% for owner in task_owners if owner.record_type == "area" %}<option value="area:{{ owner.record_id }}"{% if task_form.task_owner == "area:" ~ owner.record_id %} selected{% endif %}>{{ owner.title }}</option>{% endfor %}</optgroup>
-        </select>
-      </fieldset>
-      <label for="due_date">Due date</label><input id="due_date" name="due_date" type="date" value="{{ task_form.due_date }}">
-      <label for="notes">Notes</label><textarea id="notes" name="notes" rows="3">{{ task_form.notes }}</textarea>
-      <p><button type="submit">Add task</button></p>
-    </form>
-    {% if task_form_error %}<script>document.getElementById('task-form-error')?.focus();</script>{% endif %}
-  </section>
-</div>
+<p class="muted">{{ username }} · {{ today }} · Open checkbox observations from approved wiki sources.</p>
+<section class="card">
+  <h2>Open checklist tasks</h2>
+  <p class="muted">Checkbox state is read-only in LifeOS. Update the approved checklist source directly; this view never changes a checkbox.</p>
+  {% if tasks %}{% for task in tasks %}
+  <article class="task checkbox-task">
+    <input type="checkbox" disabled aria-label="{{ 'Checked' if task.checked else 'Open' }}: {{ task.label }}"{% if task.checked %} checked{% endif %}>
+    <div class="task-title">
+      <strong>{{ task.label }}</strong><span class="muted">{{ 'Checked' if task.checked else 'Open' }}</span>
+      <div class="muted">Checklist source: {{ task.source.path }}:{{ task.source.line }}:{{ task.source.column }}{% if task.source.url %} · <a href="{{ task.source.url }}">Open checklist source</a>{% else %} · {{ task.source.diagnostic }}{% endif %}</div>
+      <div class="muted">{{ task.source.excerpt }}</div>
+      {% if task.linked_record %}<div class="muted">Linked task record: {{ task.linked_record.path }}{% if task.linked_record.url %} · <a href="{{ task.linked_record.url }}">Open linked task record</a>{% else %} · {{ task.linked_record.diagnostic }}{% endif %}{% if task.linked_record.summary %} · {{ task.linked_record.summary }}{% endif %}{% if task.linked_record.priority is not none %} · priority {{ task.linked_record.priority }}{% endif %}</div>{% endif %}
+    </div>
+  </article>
+  {% endfor %}{% else %}<p class="empty">No open checkbox observations in approved wiki sources.</p>{% endif %}
+</section>
+{% if diagnostics %}<section class="card" aria-labelledby="checkbox-diagnostics"><h2 id="checkbox-diagnostics">Scanner diagnostics</h2>{% for diagnostic in diagnostics %}<div class="diagnostic"><strong>{{ diagnostic.code }}</strong>: {{ diagnostic.message }} <span class="muted">{{ diagnostic.source.path }}:{{ diagnostic.source.line }}:{{ diagnostic.source.column }}</span></div>{% endfor %}</section>{% endif %}
 {% endblock %}

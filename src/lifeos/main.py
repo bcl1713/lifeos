@@ -7,11 +7,13 @@ from lifeos import __version__
 from lifeos.area_api import router as area_router
 from lifeos.auth import AuthService
 from lifeos.build_info import BUILD_REVISION, BUILD_VERSION
+from lifeos.checkbox_task_read_api import router as checkbox_task_read_router
 from lifeos.context_api import router as context_router
 from lifeos.db import create_engine, create_session_factory, initialize_database
 from lifeos.metric_api import router as metric_router
 from lifeos.scheduler import scheduler_lifespan
-from lifeos.source_api import router as source_router, view_router as source_view_router
+from lifeos.source_api import router as source_router
+from lifeos.source_api import view_router as source_view_router
 from lifeos.task_api import router as task_router
 from lifeos.ui import router as ui_router
 from lifeos.wiki_context_api import router as wiki_context_router
@@ -74,6 +76,7 @@ def create_app(
     configured_wiki_root = wiki_root or os.getenv("LIFEOS_WIKI_ROOT")
     app.state.wiki_repository = WikiRepository(configured_wiki_root) if configured_wiki_root else None
     app.include_router(context_router)
+    app.include_router(checkbox_task_read_router)
     app.include_router(area_router)
     app.include_router(task_router)
     app.include_router(metric_router)
