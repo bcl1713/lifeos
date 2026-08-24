@@ -11,7 +11,14 @@ from sqlalchemy.orm import Session
 
 from lifeos.domain import AuditRecord, Goal, Project, Routine, Task, TaskDependency, TaskList, utcnow
 from lifeos.legacy_retirement import raise_legacy_domain_retired
-from lifeos.wiki_store import WikiConflictError, WikiReconciliationRequiredError, WikiRepository, slugify
+from lifeos.wiki_store import (
+    WikiConflictError,
+    WikiReconciliationRequiredError,
+    WikiRepository,
+    normalize_task_notes,
+    slugify,
+    task_summary_body,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -158,6 +165,7 @@ def sync_task_to_wiki(
     task: Task,
     expected_hash: str | None = None,
     dependency_wiki_ids: list[str] | None = None,
+    body: str | None = None,
 ) -> None:
     repository: WikiRepository | None = session.info.get("wiki_repository")
     if repository is None:
@@ -200,7 +208,6 @@ def sync_task_to_wiki(
         fields = {
             "id": record_id,
             "status": task.status,
-            "notes": task.notes,
             "priority": task.priority,
             "tags": json.loads(task.tags or "[]"),
             "source_ref": task.source_ref,
@@ -219,7 +226,15 @@ def sync_task_to_wiki(
         if existing is not None:
             task.wiki_id, task.wiki_path = existing.record_id, existing.path
             fields["id"] = existing.record_id
-        record = repository.write("task", task.title, fields, path=task.wiki_path, expected_hash=expected_hash)
+        record = repository.write(
+            "task",
+            task.title,
+            fields,
+            body="" if body is None else body,
+            path=task.wiki_path,
+            expected_hash=expected_hash,
+            remove_fields=("notes",) if body is not None else (),
+        )
     task.wiki_id, task.wiki_path, task.wiki_hash = record.record_id, record.path, record.content_hash
 
 
@@ -321,6 +336,7 @@ def create_canonical_task(
     if repository is None:
         raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
     values = payload.model_dump()
+    values["notes"] = normalize_task_notes(payload.notes)
     owner_type, owner_wiki_id, owner = resolve_task_owner(
         repository, task_list, payload.owner_type, payload.owner_wiki_id
     )
@@ -343,7 +359,6 @@ def create_canonical_task(
         {
             "id": canonical_id,
             "status": initial_status,
-            "notes": payload.notes,
             "priority": payload.priority,
             "tags": payload.tags,
             "source_ref": payload.source_ref,
@@ -358,6 +373,7 @@ def create_canonical_task(
         },
         path=canonical_path or repository.task_path(owner, payload.title, canonical_id),
         expected_hash=expected_hash,
+        body=task_summary_body(payload.title, values["notes"]),
     )
     task = Task(
         **values,
@@ -416,6 +432,8 @@ def update_task(
     expected_hash = changes.pop("expected_hash", None)
     if not expected_hash:
         raise HTTPException(status_code=409, detail="expected_hash is required for canonical task mutation")
+    if "notes" in changes:
+        changes["notes"] = normalize_task_notes(changes["notes"])
     if "tags" in changes:
         changes["tags"] = json.dumps(changes["tags"], sort_keys=True)
     task_list = session.get(TaskList, changes["task_list_id"]) if "task_list_id" in changes else task.task_list
@@ -434,7 +452,12 @@ def update_task(
     for field, value in changes.items():
         setattr(task, field, value)
     try:
-        sync_task_to_wiki(session, task, expected_hash)
+        sync_task_to_wiki(
+            session,
+            task,
+            expected_hash,
+            body=task_summary_body(task.title, task.notes) if "notes" in changes else None,
+        )
     except WikiReconciliationRequiredError as exc:
         session.rollback()
         raise_reconciliation_required(exc)

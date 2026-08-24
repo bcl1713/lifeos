@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from lifeos.domain import Project, Routine, Task, TaskList
 from lifeos.main import create_app
+from lifeos.scripts_bridge import sync_wiki_projection
 from lifeos.wiki_store import WikiRepository
 
 
@@ -38,6 +39,120 @@ def test_api_task_create_update_and_completion_write_canonical_wiki(tmp_path: Pa
         f"/api/tasks/{task['id']}/complete", params={"expected_hash": updated.json()["wiki_hash"]}
     ).status_code == 200
     assert "status: completed" in path.read_text(encoding="utf-8")
+
+
+def test_task_notes_are_canonical_summary_content_for_api_and_detail_view(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'task-notes.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+
+    created = client.post(
+        "/api/tasks",
+        json={
+            "title": "Canonical summary task",
+            "task_list_id": task_list["id"],
+            "notes": "Keep this canonical prose.",
+        },
+    )
+
+    assert created.status_code == 201
+    task = created.json()
+    source = (wiki / task["wiki_path"]).read_text(encoding="utf-8")
+    assert "notes:" not in source
+    assert "## Summary\n\nKeep this canonical prose." in source
+    assert client.get("/api/tasks").json()[0]["notes"] == "Keep this canonical prose."
+    assert "Keep this canonical prose." in client.get("/tasks").text
+
+
+def test_nested_heading_task_notes_survive_projection_rebuild(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'nested-task-notes.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+    notes = "Intro\n\n## Detail\n\nThis must survive."
+
+    created = client.post(
+        "/api/tasks",
+        json={"title": "Nested canonical summary task", "task_list_id": task_list["id"], "notes": notes},
+    )
+
+    assert created.status_code == 201
+    task = created.json()
+    assert notes in (wiki / task["wiki_path"]).read_text(encoding="utf-8")
+    with app.state.session_factory() as session:
+        session.query(Task).delete()
+        sync_wiki_projection(session, app.state.wiki_repository)
+        session.commit()
+
+    rebuilt_task = client.get("/api/tasks").json()[0]
+    assert rebuilt_task["notes"] == notes
+    assert notes in client.get("/tasks").text
+
+
+def test_empty_task_notes_do_not_create_an_empty_summary_placeholder(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'empty-task-notes.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+
+    created = client.post("/api/tasks", json={"title": "No summary task", "task_list_id": task_list["id"], "notes": ""})
+
+    assert created.status_code == 201
+    source = (wiki / created.json()["wiki_path"]).read_text(encoding="utf-8")
+    assert "## Summary" not in source
+    assert "notes:" not in source
+
+
+def test_projection_keeps_legacy_task_notes_readable(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'legacy-task-notes.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    WikiRepository(wiki).write(
+        "task",
+        "Legacy notes task",
+        {
+            "id": "tsk-legacy-notes",
+            "status": "open",
+            "task_list": "Inbox",
+            "owner_type": "inbox",
+            "notes": "Preserve legacy prose.",
+        },
+    )
+
+    with app.state.session_factory() as session:
+        sync_wiki_projection(session, app.state.wiki_repository)
+        session.commit()
+
+    assert client.get("/api/tasks").json()[0]["notes"] == "Preserve legacy prose."
 
 
 def test_api_task_update_rejects_stale_wiki_hash(tmp_path: Path) -> None:
