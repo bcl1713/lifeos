@@ -50,6 +50,8 @@ operator checks.
 
 Tasks—including dependencies, parentage, recurrence/occurrence identity, status, and completion state—follow the same contract as active Projects and Areas. SQLite rows use local integer keys only for query efficiency; durable relationships are serialized with stable wiki IDs and rebuilt in a second pass independent of discovery order. Retired Goal and Routine projections are excluded from active mutation and recurrence generation; their read-only inventory contract is in [`goals-routines-retirement.md`](goals-routines-retirement.md).
 
+Checkbox task discovery is separately specified in `docs/wiki-checkbox-task-grammar.md`. Its future scanner is a read-only, deterministic source observation: checkbox occurrences own visible completion state, linked typed task records are optional metadata, and plain checkboxes are read-only observations until an explicit mutable-identity policy is approved. The specification does not change current task APIs, projections, owner/task directories, or canonical Markdown.
+
 `scripts/sync_wiki_projection.py --check` is the non-mutating reconciliation gate. It reports missing and orphaned projections, duplicate identities and paths, stale hashes, type/path conflicts, missing identities, and invalid source links. A writable sync must refuse ambiguous canonical identities before mutating SQLite.
 
 ## Task descriptive-content contract
