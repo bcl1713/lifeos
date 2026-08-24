@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
+from lifeos.domain import Task
 from lifeos.main import create_app
 
 
@@ -39,6 +40,65 @@ def test_web_ui_login_today_create_and_complete_task(tmp_path) -> None:
 
     assert client.post("/auth/logout").status_code == 204
     assert client.get("/").status_code == 303
+
+
+def test_web_ui_renders_api_tag_arrays_as_individual_chips(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'tags.db'}",
+        auth_username="brian",
+        auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+
+    created = client.post(
+        "/api/tasks",
+        json={
+            "title": "Tag array task",
+            "task_list_id": inbox["id"],
+            "owner_type": "inbox",
+            "tags": ["focus", "home"],
+        },
+    )
+
+    assert created.status_code == 201
+    assert created.json()["tags"] == ["focus", "home"]
+    today = client.get("/")
+    tasks = client.get("/tasks")
+    for page in (today, tasks):
+        assert page.status_code == 200
+        assert '<li class="tag-chip">focus</li>' in page.text
+        assert '<li class="tag-chip">home</li>' in page.text
+        assert page.text.count('class="tag-chip"') == 2
+
+
+def test_web_ui_renders_serialized_tag_strings_as_individual_chips(tmp_path) -> None:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'legacy-tags.db'}",
+        auth_username="brian",
+        auth_password="password",
+        wiki_root=str(tmp_path / "wiki"),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    inbox = client.post("/api/task-lists", json={"name": "Inbox"}).json()
+    created = client.post(
+        "/api/tasks",
+        json={"title": "Legacy tag task", "task_list_id": inbox["id"], "owner_type": "inbox"},
+    ).json()
+    assert 'class="tag-chip"' not in client.get("/tasks").text
+    with app.state.session_factory() as session:
+        task = session.get(Task, created["id"])
+        task.tags = '["legacy"]'
+        session.commit()
+
+    page = client.get("/tasks")
+
+    assert page.status_code == 200
+    assert '<li class="tag-chip">legacy</li>' in page.text
+    assert page.text.count('class="tag-chip"') == 1
 
 
 def test_web_task_creation_writes_source_before_projection(tmp_path, monkeypatch) -> None:
