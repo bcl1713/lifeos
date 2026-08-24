@@ -26,11 +26,13 @@ def test_container_build_embeds_release_identity_and_workflow_passes_it() -> Non
 
     assert "ARG LIFEOS_BUILD_VERSION=local-dev" in dockerfile
     assert "ARG LIFEOS_BUILD_REVISION=unknown" in dockerfile
+    assert "ARG LIFEOS_PACKAGE_VERSION=0.0.0+local" in dockerfile
     assert "org.opencontainers.image.version=$LIFEOS_BUILD_VERSION" in dockerfile
     assert "org.opencontainers.image.revision=$LIFEOS_BUILD_REVISION" in dockerfile
-    assert "src/lifeos/build_info.py" in dockerfile
+    assert "embed_build_metadata.py" in dockerfile
     assert "LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}" in workflow
     assert "LIFEOS_BUILD_REVISION=${{ github.sha }}" in workflow
+    assert "LIFEOS_PACKAGE_VERSION=${{ needs.verify.outputs.package_version }}" in workflow
 
 
 def test_entrypoint_validates_supplementary_gids_before_privilege_drop() -> None:

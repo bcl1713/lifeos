@@ -26,6 +26,7 @@ jobs:
     outputs:
       channel: ${{ steps.release.outputs.channel }}
       version: ${{ steps.release.outputs.version }}
+      package_version: ${{ steps.release.outputs.package_version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,6 +63,8 @@ jobs:
             echo "channel=stable" >> "$GITHUB_OUTPUT"
             echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           fi
+          package_version="$(python scripts/validate_release_policy.py --mode package --version "$version")"
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
       - uses: astral-sh/setup-uv@v5
         with:
           version: latest
@@ -96,6 +99,15 @@ jobs:
           version_digest=""
           if docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" >/dev/null 2>&1; then
             version_digest="$(docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" --format '{{.Manifest.Digest}}')"
+            version_revision="$(docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" --format '{{ index .Image.Config.Labels "org.opencontainers.image.revision" }}')"
+            version_label="$(docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$VERSION" --format '{{ index .Image.Config.Labels "org.opencontainers.image.version" }}')"
+            if [ "$version_revision" != "$GITHUB_SHA" ] || [ "$version_label" != "$VERSION" ]; then
+              echo "refusing to use existing image tag with different immutable identity: $VERSION" >&2
+              exit 1
+            fi
+            echo "version_unpublished=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_unpublished=true" >> "$GITHUB_OUTPUT"
           fi
           sha_digest=""
           if docker buildx imagetools inspect "ghcr.io/bcl1713/lifeos:$SHA_TAG" >/dev/null 2>&1; then
@@ -103,15 +115,6 @@ jobs:
             echo "sha_unpublished=false" >> "$GITHUB_OUTPUT"
           else
             echo "sha_unpublished=true" >> "$GITHUB_OUTPUT"
-          fi
-          if [ -n "$version_digest" ]; then
-            if [ -z "$sha_digest" ] || [ "$version_digest" != "$sha_digest" ]; then
-              echo "refusing to overwrite existing image tag: $VERSION" >&2
-              exit 1
-            fi
-            echo "version_unpublished=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "version_unpublished=true" >> "$GITHUB_OUTPUT"
           fi
       - name: Extract image metadata
         id: meta
@@ -122,7 +125,7 @@ jobs:
             type=raw,value=${{ needs.verify.outputs.version }}
             type=raw,value=sha-${{ github.sha }},enable=${{ steps.immutable_tags.outputs.sha_unpublished }}
       - name: Build and publish
-        if: steps.immutable_tags.outputs.sha_unpublished == 'true'
+        if: steps.immutable_tags.outputs.version_unpublished == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -132,15 +135,9 @@ jobs:
           build-args: |
             LIFEOS_BUILD_VERSION=${{ needs.verify.outputs.version }}
             LIFEOS_BUILD_REVISION=${{ github.sha }}
+            LIFEOS_PACKAGE_VERSION=${{ needs.verify.outputs.package_version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Publish existing commit image as release version
-        if: steps.immutable_tags.outputs.sha_unpublished != 'true' && steps.immutable_tags.outputs.version_unpublished == 'true'
-        env:
-          VERSION: ${{ needs.verify.outputs.version }}
-          SHA_TAG: sha-${{ github.sha }}
-        run: |
-          docker buildx imagetools create --tag "ghcr.io/bcl1713/lifeos:$VERSION" "ghcr.io/bcl1713/lifeos:$SHA_TAG"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
