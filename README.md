@@ -48,13 +48,28 @@ The development health endpoint is available at `http://127.0.0.1:8000/healthz`.
 
 ## Release model
 
-The package version is the `[project].version` value in `pyproject.toml`. Release artifacts are immutable and always use an explicit version or `sha-<commit>` tag; production deployment must use an explicit version tag or digest, never `latest`.
+The checked-in base package version is the `[project].version` value in
+`pyproject.toml`. Published artifacts derive their own PEP 440
+`package_version` from their release-channel `build_version`; the build embeds
+both values before installation. Release artifacts are immutable and always use
+an explicit version or `sha-<commit>` tag; production deployment must use an
+explicit version tag or digest, never `latest`.
+
+| Published channel | `build_version` / image version tag | Runtime `package_version` (PEP 440) |
+| --- | --- | --- |
+| Dev | `v0.6.3-dev.51` | `0.6.3.dev51` |
+| RC | `v0.6.3-rc.1` | `0.6.3rc1` |
+| Stable | `v0.6.3` | `0.6.3` |
+
+The examples use checked-in base version `0.6.2`, whose next artifact version
+is `0.6.3`. The release workflow derives this next artifact version rather than
+publishing the checked-in base value.
 
 - A successful push or merge to `dev` first runs verification, tests, and the package build. Only after those checks pass does it publish the unique candidate `v<next-patch>-dev.<GitHub-run-number>` and `sha-<commit>` tags to `ghcr.io/bcl1713/lifeos` and create a GitHub prerelease. The candidate's patch number is one greater than `[project].version`.
 - Pull-request pushes and failed checks publish no image or release. This workflow does not publish a mutable `dev` convenience tag, `latest`, a stable tag, or perform an automatic deployment or production promotion.
 - RC publication remains a manual dispatch from `dev` with an explicit `vMAJOR.MINOR.PATCH-rc.N` version. Stable `vMAJOR.MINOR.PATCH` releases remain `main`-only, after Brian approves the `dev` → `main` release gate.
 
-Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After publication, verify the GitHub Release and resolve both the candidate/version tag and its `sha-<commit>` tag to the same image digest before testing or promotion. Deployment configuration and rollout remain separate, explicit changes in `bcl1713/homelab-stacks`.
+Run `python scripts/validate_release_policy.py --repository .` to check the release workflow controls. After publication, verify the GitHub Release and resolve both the candidate/version tag and its `sha-<commit>` tag to the same image digest before testing or promotion. The runtime `/healthz` response exposes the artifact's `package_version`, `build_version`, and `build_revision`; the latter two correspond to OCI version and revision labels. See [the operator build-identity procedure](docs/operations.md#health-build-identity-and-artifact-verification) for the diagnostic and comparison steps. Deployment configuration and rollout remain separate, explicit changes in `bcl1713/homelab-stacks`.
 
 ## Boundaries
 
