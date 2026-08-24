@@ -1,11 +1,12 @@
 # Wiki checkbox task discovery: operator and user guide
 
-Status: documentation for the reviewed, not-yet-merged checkbox read and refresh
-work in [PR #65](https://github.com/bcl1713/lifeos/pull/65) and
-[PR #66](https://github.com/bcl1713/lifeos/pull/66). It describes the contract
-that becomes available only after those changes and this documentation change are
-independently reviewed and merged to `dev`. It is not evidence of a production
-deployment or a `main` action.
+Status: the checkbox read and refresh contract in [PR #65](https://github.com/bcl1713/lifeos/pull/65)
+and [PR #66](https://github.com/bcl1713/lifeos/pull/66) is integrated to `dev`.
+The no-projection-DB read compatibility and scanner CLI additions are independently
+reviewed in [PR #69](https://github.com/bcl1713/lifeos/pull/69) at
+`a100b0c9286ed1a2454e065c5bb5218da626d146`. Their use requires that PR and this
+documentation change to be independently reviewed and merged to `dev`; neither is
+evidence of a production deployment or a `main` action.
 
 The grammar, identity, and diagnostic rules remain the executable contract in
 [wiki-checkbox-task-grammar.md](wiki-checkbox-task-grammar.md). This guide
@@ -59,6 +60,47 @@ record's status. Input findings are displayed in the browser and returned in
 links, unusable linked records, repeated linked records, and checkbox/linked
 record status disagreement. Correct the canonical Markdown source or its linked
 record deliberately; diagnostics do not trigger automatic repair.
+
+When more than one checkbox occurrence links to the same typed task record, the
+scanner emits `DUPLICATE_LINKED_TASK_RECORD` for every occurrence in that set,
+including the first. Each occurrence remains visible at its own source locator:
+do not merge, deduplicate, select a winner, or render it twice through a typed
+task list.
+
+## No-projection-DB read compatibility and scanner CLI
+
+The checkbox read model is scanner-authoritative. Removing a projection SQLite
+database and initializing a replacement does not change canonical checkbox reads:
+the scanner reads the configured canonical Markdown, not the projection database.
+The checkbox endpoint does not merge checkbox observations with legacy typed task
+records or fall back to SQL rows.
+
+Legacy typed task records linked from a checkbox remain optional readable metadata
+(title, Summary, and priority). They neither control checkbox state nor replace a
+checkbox occurrence. A plain checkbox remains a read-only observation and is not
+promoted into a typed task record.
+
+Use the scanner-only command to inspect a configured wiki root:
+
+```bash
+python scripts/scan_wiki_checkbox_tasks.py --wiki-root /wiki
+```
+
+It prints deterministic JSON with `tasks`, `diagnostics`, and the effective
+`policy`. Repeat `--exclude DIRECTORY` to add each directory name to the scanner
+exclusions, for example:
+
+```bash
+python scripts/scan_wiki_checkbox_tasks.py \
+  --wiki-root /wiki \
+  --exclude generated \
+  --exclude vendor
+```
+
+This command is read-only: it does not write canonical Markdown, use the
+projection SQLite database, create a migration, or change checkbox state. Use it
+for inspection only; update approved checklist Markdown directly when a checkbox
+state or source diagnostic requires correction.
 
 ## API and inspection
 
@@ -133,9 +175,10 @@ handle its JSON `503` semantics; it must not scrape the browser recovery HTML.
 
 ## Boundaries and rollout
 
-This documentation authorizes no source writes, real-wiki apply, deployment,
-release, production change, or `main` action. It does not alter the existing
-source-first workflow for canonical typed Tasks, the daily-capture review
-workflow, or projection reconciliation. Independent documentation review and a
-separate merge/verification phase remain required before relying on this
-contract in an integration or operational environment.
+This documentation authorizes no source writes, real-wiki apply, schema or data
+deletion, deployment, release, production change, or `main` action. It does not
+alter the existing source-first `/api/tasks` lifecycle for canonical typed Tasks,
+the daily-capture review workflow, or projection reconciliation. Independent
+documentation review and a separate merge/verification phase remain required
+before relying on the PR #69 additions in an integration or operational
+environment.
