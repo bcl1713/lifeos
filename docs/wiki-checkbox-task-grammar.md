@@ -91,9 +91,14 @@ The occurrence remains visible as a plain, read-only observation with its diagno
 ## State, identity, and repeated references
 
 Checkbox state is authoritative: `[ ]` is open and `[x]` is completed. A linked task
-record status is metadata-only during this transition. Any disagreement between
-checkbox state and record status is diagnostic-only; the scanner never writes either
-source.
+record status is metadata-only during this transition. If an open checkbox links to a
+record with `status: completed`, or a completed checkbox links to a record with
+`status: open`, emit `CHECKBOX_STATUS_DISAGREEMENT` at the checkbox locator. It is a
+warning with the message `Checkbox is <checkbox state> but linked task record status
+is <record status>; checkbox state remains authoritative.` and includes the safe
+`link_destination` and `linked_record_path`. Other linked-record statuses are
+metadata without a checkbox-state equivalence in this phase and do not produce this
+diagnostic. The scanner never writes either source.
 
 Identity has two layers:
 
@@ -141,8 +146,8 @@ input findings), `message`, and the source locator. Diagnostics may additionally
 include safe `link_destination` and `linked_record_path` values. They must never put
 host-absolute paths, file contents other than the excerpt, or database identifiers in
 the result. Codes in this phase are `MALFORMED_CHECKBOX`, `UNSAFE_TASK_LINK`,
-`MISSING_TASK_RECORD`, `UNTYPED_TASK_RECORD`, `WRONG_TASK_RECORD_TYPE`, and
-`DUPLICATE_LINKED_TASK_RECORD`.
+`MISSING_TASK_RECORD`, `UNTYPED_TASK_RECORD`, `WRONG_TASK_RECORD_TYPE`,
+`DUPLICATE_LINKED_TASK_RECORD`, and `CHECKBOX_STATUS_DISAGREEMENT`.
 
 ## Compatibility boundary
 

@@ -6,6 +6,7 @@
     {"source_path": "01-Projects/Alpha/index.md", "line": 6, "source_line": "- [ ] [Missing task](lifeos/tasks/missing.md)", "checked": false, "label": "Missing task", "linked_task_path": null, "linked_task_id": null, "identity": "plain source-path plus content-fingerprint; read-only"},
     {"source_path": "01-Projects/Alpha/index.md", "line": 7, "source_line": "- [ ] [Wrong type](lifeos/tasks/wrong-type.md)", "checked": false, "label": "Wrong type", "linked_task_path": null, "linked_task_id": null, "identity": "plain source-path plus content-fingerprint; read-only"},
     {"source_path": "01-Projects/Alpha/index.md", "line": 8, "source_line": "- [ ] [Unsafe task](../../outside.md)", "checked": false, "label": "Unsafe task", "linked_task_path": null, "linked_task_id": null, "identity": "plain source-path plus content-fingerprint; read-only"},
+    {"source_path": "01-Projects/Alpha/index.md", "line": 10, "source_line": "- [ ] [Completed record](lifeos/tasks/completed-record.md)", "checked": false, "label": "Completed record", "linked_task_path": "01-Projects/Alpha/lifeos/tasks/completed-record.md", "linked_task_id": "tsk-completed-record", "identity": "tsk-completed-record plus checkbox occurrence locator"},
     {"source_path": "02-Areas/Home/index.md", "line": 3, "source_line": "- [ ] [No metadata](lifeos/tasks/no-frontmatter.md)", "checked": false, "label": "No metadata", "linked_task_path": null, "linked_task_id": null, "identity": "plain source-path plus content-fingerprint; read-only"},
     {"source_path": "dailies/2026-08-24.md", "line": 3, "source_line": "- [X] Review daily capture", "checked": true, "label": "Review daily capture", "linked_task_path": null, "linked_task_id": null, "identity": "plain source-path plus content-fingerprint; read-only"}
   ],
@@ -16,6 +17,7 @@
     {"code": "WRONG_TASK_RECORD_TYPE", "source_path": "01-Projects/Alpha/index.md", "line": 7, "source_line": "- [ ] [Wrong type](lifeos/tasks/wrong-type.md)"},
     {"code": "UNSAFE_TASK_LINK", "source_path": "01-Projects/Alpha/index.md", "line": 8, "source_line": "- [ ] [Unsafe task](../../outside.md)"},
     {"code": "MALFORMED_CHECKBOX", "source_path": "01-Projects/Alpha/index.md", "line": 9, "source_line": "- [y] Unsupported checkbox state"},
+    {"code": "CHECKBOX_STATUS_DISAGREEMENT", "severity": "warning", "message": "Checkbox is open but linked task record status is completed; checkbox state remains authoritative.", "source_path": "01-Projects/Alpha/index.md", "line": 10, "source_line": "- [ ] [Completed record](lifeos/tasks/completed-record.md)", "link_destination": "lifeos/tasks/completed-record.md", "linked_record_path": "01-Projects/Alpha/lifeos/tasks/completed-record.md"},
     {"code": "UNTYPED_TASK_RECORD", "source_path": "02-Areas/Home/index.md", "line": 3, "source_line": "- [ ] [No metadata](lifeos/tasks/no-frontmatter.md)"}
   ],
   "excluded_paths": ["03-Research/ignored.md", "04-Archives/ignored.md", "templates/ignored.md"]

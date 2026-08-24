@@ -7,3 +7,4 @@
 - [ ] [Wrong type](lifeos/tasks/wrong-type.md)
 - [ ] [Unsafe task](../../outside.md)
 - [y] Unsupported checkbox state
+- [ ] [Completed record](lifeos/tasks/completed-record.md)
