@@ -41,6 +41,7 @@ class TaskCreate(BaseModel):
     parent_id: int | None = None
     owner_wiki_id: str | None = Field(default=None, max_length=300)
     owner_type: Literal["project", "area", "inbox"] | None = None
+    canonical_path: str | None = Field(default=None, max_length=1000)
 
 
 class TaskUpdate(BaseModel):
@@ -261,7 +262,10 @@ def resolve_task_owner(
         return "inbox", None, None
     if owner_type not in {"project", "area"} or not owner_wiki_id:
         raise HTTPException(status_code=422, detail="non-Inbox tasks require an explicit Project or Area owner")
-    owner = repository.find_by_id(owner_wiki_id)
+    try:
+        owner = repository.find_by_id(owner_wiki_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if owner is None or owner.record_type != owner_type:
         raise HTTPException(status_code=422, detail="task owner does not resolve to the declared canonical type")
     return owner_type, owner.record_id, owner
@@ -336,6 +340,7 @@ def create_canonical_task(
     if repository is None:
         raise HTTPException(status_code=503, detail="Canonical wiki repository is not configured")
     values = payload.model_dump()
+    values.pop("canonical_path", None)
     values["notes"] = normalize_task_notes(payload.notes)
     owner_type, owner_wiki_id, owner = resolve_task_owner(
         repository, task_list, payload.owner_type, payload.owner_wiki_id
@@ -347,6 +352,20 @@ def create_canonical_task(
     canonical_id = record_id or f"tsk-{slugify(payload.title)}"
     if record_id is None and repository.find_by_id(canonical_id) is not None:
         canonical_id = f"{canonical_id}-{uuid4().hex[:8]}"
+    explicit_path = payload.canonical_path
+    if explicit_path is not None:
+        try:
+            explicit_path = repository.task_location(owner, explicit_path, canonical_id)
+        except WikiConflictError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+    elif canonical_path is not None:
+        try:
+            existing = repository.find_by_id(canonical_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        if existing is None or existing.record_type != "task" or existing.path != canonical_path:
+            raise HTTPException(status_code=409, detail="canonical task identity and path disagree")
+        explicit_path = existing.path
     related = {
         "goal_wiki_id": session.get(Goal, payload.goal_id).wiki_id if payload.goal_id else None,
         "project_wiki_id": session.get(Project, payload.project_id).wiki_id if payload.project_id else None,
@@ -371,7 +390,7 @@ def create_canonical_task(
             "depends_on": [],
             **(canonical_metadata or {}),
         },
-        path=canonical_path or repository.task_path(owner, payload.title, canonical_id),
+        path=explicit_path or repository.task_path(owner, payload.title, canonical_id),
         expected_hash=expected_hash,
         body=task_summary_body(payload.title, values["notes"]),
     )

@@ -41,6 +41,174 @@ def test_api_task_create_update_and_completion_write_canonical_wiki(tmp_path: Pa
     assert "status: completed" in path.read_text(encoding="utf-8")
 
 
+def test_authenticated_task_creation_preserves_an_explicit_nested_owner_location(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'explicit-location.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
+    owner_path = wiki / project["wiki_path"]
+    owner_path.write_text(owner_path.read_text(encoding="utf-8") + "\n- [ ] Keep this inline\n", encoding="utf-8")
+    checkbox_before = owner_path.read_bytes()
+    canonical_path = "01-Projects/renovate-kitchen/notes/next-actions/book-contractor.md"
+
+    created = client.post(
+        "/api/tasks",
+        json={
+            "title": "Book contractor",
+            "task_list_id": task_list["id"],
+            "owner_type": "project",
+            "owner_wiki_id": project["wiki_id"],
+            "canonical_path": canonical_path,
+            "notes": "Use the approved vendor list.",
+        },
+    )
+
+    assert created.status_code == 201
+    task = created.json()
+    assert task["wiki_path"] == canonical_path
+    assert owner_path.read_bytes() == checkbox_before
+    source = app.state.wiki_repository.read(canonical_path)
+    assert source.record_type == "task"
+    assert source.record_id == task["wiki_id"]
+    assert source.fields["owner_wiki_id"] == project["wiki_id"]
+    assert source.body == "# Book contractor\n\n## Summary\n\nUse the approved vendor list.\n"
+    assert client.get("/api/tasks").json() == [task]
+
+
+@pytest.mark.parametrize(
+    ("canonical_path", "detail"),
+    [
+        ("01-Projects/renovate-kitchen/../escaped.md", "escapes"),
+        ("04-Archives/renovate-kitchen/task.md", "within the owning"),
+        ("02-Areas/house/tasks/foreign.md", "within the owning"),
+        ("01-Projects/renovate-kitchen/index.md", "already contains a project"),
+    ],
+)
+def test_explicit_task_location_conflicts_do_not_mutate_source_or_projection(
+    tmp_path: Path, canonical_path: str, detail: str
+) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'explicit-location-conflict.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
+    before = {path.relative_to(wiki).as_posix(): path.read_bytes() for path in wiki.rglob("*.md")}
+
+    response = client.post(
+        "/api/tasks",
+        json={
+            "title": "Rejected task",
+            "task_list_id": task_list["id"],
+            "owner_type": "project",
+            "owner_wiki_id": project["wiki_id"],
+            "canonical_path": canonical_path,
+        },
+    )
+
+    assert response.status_code == 409
+    assert detail in response.json()["detail"]
+    assert {path.relative_to(wiki).as_posix(): path.read_bytes() for path in wiki.rglob("*.md")} == before
+    assert client.get("/api/tasks").json() == []
+
+
+def test_explicit_area_location_survives_source_first_projection_failure(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'explicit-location-projection-failure.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    area = client.post("/api/areas", json={"title": "House"}).json()
+    canonical_path = "02-Areas/house/maintenance/replace-filter.md"
+
+    def fail_projection(session, _context, _instances):
+        if any(isinstance(item, Task) and item.title == "Projection failure filter" for item in session.new):
+            raise RuntimeError("simulated projection failure")
+
+    event.listen(Session, "before_flush", fail_projection)
+    try:
+        response = client.post(
+            "/api/tasks",
+            json={
+                "title": "Projection failure filter",
+                "task_list_id": task_list["id"],
+                "owner_type": "area",
+                "owner_wiki_id": area["id"],
+                "canonical_path": canonical_path,
+            },
+        )
+    finally:
+        event.remove(Session, "before_flush", fail_projection)
+
+    assert response.status_code == 503
+    detail = response.json()["detail"]
+    assert detail["code"] == "canonical_source_written_projection_failed"
+    assert detail["wiki_path"] == canonical_path
+    assert app.state.wiki_repository.read(canonical_path).fields["owner_wiki_id"] == area["id"]
+    with app.state.session_factory() as session:
+        assert session.query(Task).count() == 0
+
+
+def test_explicit_task_location_rejects_duplicate_canonical_ids_before_any_write(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'explicit-location-duplicate-id.db'}",
+        auth_username="brian",
+        auth_password="password",
+        scheduler_enabled=False,
+        wiki_root=str(wiki),
+    )
+    client = TestClient(app)
+    assert client.post("/auth/login", json={"username": "brian", "password": "password"}).status_code == 204
+    task_list = client.post("/api/task-lists", json={"name": "Personal"}).json()
+    project = client.post("/api/projects", json={"title": "Renovate kitchen"}).json()
+    repository = app.state.wiki_repository
+    first = repository.write(
+        "task",
+        "Duplicate identity",
+        {"id": "tsk-duplicate-identity", "status": "open", "task_list": "Inbox", "owner_type": "inbox"},
+    )
+    duplicate = wiki / "01-Projects/renovate-kitchen/notes/duplicate-identity.md"
+    duplicate.parent.mkdir(parents=True)
+    duplicate.write_bytes((wiki / first.path).read_bytes())
+    before = {path.relative_to(wiki).as_posix(): path.read_bytes() for path in wiki.rglob("*.md")}
+
+    response = client.post(
+        "/api/tasks",
+        json={
+            "title": "Blocked by duplicate identity",
+            "task_list_id": task_list["id"],
+            "owner_type": "project",
+            "owner_wiki_id": project["wiki_id"],
+            "canonical_path": "01-Projects/renovate-kitchen/notes/blocked.md",
+        },
+    )
+
+    assert response.status_code == 409
+    assert "ambiguous canonical wiki IDs" in response.json()["detail"]
+    assert {path.relative_to(wiki).as_posix(): path.read_bytes() for path in wiki.rglob("*.md")} == before
+
+
 def test_task_notes_are_canonical_summary_content_for_api_and_detail_view(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     app = create_app(
