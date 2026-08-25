@@ -59,6 +59,26 @@ a `main` change. After the approved integration, use its read-only browser/API
 checks and recovery guidance; do not use SQLite or a watcher as an authority or
 repair mechanism.
 
+For a checkbox that should expose typed task metadata, use exactly one inline
+Markdown destination beginning with lowercase `task:`, such as
+`[Change brakes](task:lifeos/tasks/change-brakes.md)`. The marker is recognized
+before its path payload is decoded once; encode path spaces as `%20`. Do not use
+uppercase `TASK:`, literal/escaped spaces, malformed percent escapes, queries,
+fragments, absolute paths, schemes, or traversal. These forms are diagnostics,
+not an operator repair request, and they do not make the scanner write source.
+Two markers produce `TYPED_TASK_LINK_CARDINALITY`; a malformed marker produces
+`MALFORMED_TYPED_TASK_LINK`.
+
+All other Markdown and canonical wiki links in checkbox labels are supporting
+context. Safe relative Markdown and canonical wiki targets are exposed as
+separate read-only navigation actions in source order; `http`/`https` links are
+literal external actions that LifeOS never fetches. Supporting links do not
+load typed metadata. An unmarked Markdown link that happens to point at a
+typed-shaped task record emits non-fatal `LEGACY_TYPED_TASK_LINK`; it is not a
+legacy migration signal and must not be used to update source, SQL, or a task
+record. Inspect link-indexed API diagnostics and correct canonical Markdown
+deliberately through the approved source process when necessary.
+
 ## Backup and restore
 
 Create an online backup from the running container:

@@ -83,6 +83,25 @@ with a diagnostic rather than an unsafe or broken anchor. `http`, `https`, and
 `mailto` Markdown links are treated as external links and receive protective
 `rel="noopener noreferrer"` attributes.
 
+### Checkbox supporting-link navigation
+
+Checkbox task discovery uses this same safe internal-resolution model for
+ordinary supporting Markdown links and canonical wiki links, but it does not
+rewrite the checkbox label or treat those links as typed task records. The
+Today and Tasks views show each safe link as a separate supporting-link action
+in its authored mixed Markdown/wiki source order. Relative Markdown links can
+retain a query or fragment on that action; canonical wiki links retain their
+anchor. External `http`/`https` supporting links are literal actions only:
+LifeOS performs no fetch, preview, health check, or metadata import.
+
+Supporting wiki links resolve root-relative first, then source-relative, then
+by a unique bare-name match. Missing, ambiguous, malformed, and unsafe wiki
+targets—and non-Markdown Markdown targets—have no unsafe action and are
+represented by scanner diagnostics. A typed task-record association is
+deliberately different: it requires the explicit lowercase `task:` Markdown
+destination marker documented in
+[wiki-checkbox-task-discovery.md](wiki-checkbox-task-discovery.md).
+
 Before rendering, the source route validates that the requested canonical path
 stays within the wiki root and rejects unavailable or symlink-unsafe sources.
 
