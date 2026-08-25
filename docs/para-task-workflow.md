@@ -36,6 +36,38 @@ succeeds does LifeOS update the SQLite projection. If the projection cannot fini
 treat the result as reconciliation required; do not assume a database rollback
 removed the canonical source.
 
+### Optional explicit typed-record location (Project and Area only)
+
+This contract documents [implementation PR #74](https://github.com/bcl1713/lifeos/pull/74).
+It requires that implementation and this documentation change be independently
+reviewed and merged to `dev`; it does not authorize a production or `main` action.
+
+The authenticated create-task API may include a `canonical_path` when deliberately
+creating a new typed Task beneath an already resolved **Project** or **Area** owner.
+This is an optional placement control, not a checkbox workflow or a replacement for
+owner selection. Omit it to use LifeOS's normal deterministic `tasks/` location.
+Inbox tasks cannot request an explicit location, and an existing task cannot be moved
+by updating it; owner or path changes still require the controlled relocation
+workflow.
+
+An explicit path must be a relative Markdown (`.md`) path inside the configured wiki
+root **and** inside the selected owner's document set (the directory containing that
+owner's canonical record). It must not contain traversal, be absolute, use an
+escaping symlink, or otherwise leave either boundary. The API preflights the complete
+path before writing: it rejects a path occupied by any canonical record and rejects a
+canonical Task identity that is already owned elsewhere. These failures are HTTP
+`409` conflicts. Do not resolve a conflict by overwriting a source file, changing the
+owner fields, or treating a projection row as authority; inspect the canonical source
+and use the approved reconciliation or relocation procedure as applicable.
+
+For example, a Project-owned request can explicitly create a record at
+`01-Projects/Alpha/planning/release-check.md` when that location is safe and unused.
+The explicit path is used only for that new source-first creation. LifeOS writes the
+canonical Markdown at the approved location, then refreshes SQLite as its rebuildable
+projection. If that projection step fails after the source write, the response reports
+that reconciliation is required and includes the canonical record identity/path; do
+not retry blindly or infer that the Markdown write was rolled back.
+
 ## Use the task source as authority
 
 Today and **Tasks** show each task's owner and source path. When that projected

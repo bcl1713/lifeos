@@ -68,6 +68,15 @@ supporting targets similarly remain visible context with their applicable
 diagnostic. No link diagnostic removes the checkbox observation or causes an
 automatic repair.
 
+Typed records may instead be created deliberately through the authenticated
+source-first task-creation workflow. For a Project or Area owner, that workflow
+can accept an optional safe owner-scoped `canonical_path`; it does **not** promote
+an inline checkbox, infer an owner from a link, or change checkbox state. The
+checkbox remains a read-only source observation even when it explicitly uses a
+`task:` metadata link to such a record. See
+[PARA-first task workflow](para-task-workflow.md#optional-explicit-typed-record-location-project-and-area-only)
+for the placement, conflict, and reconciliation rules.
+
 The source-navigation safety contract is the same one used elsewhere in LifeOS:
 links must remain under the configured wiki root and cannot traverse an escaping
 symlink. With no `LIFEOS_SILVERBULLET_BASE_URL`, links remain on LifeOS's
