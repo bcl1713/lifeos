@@ -1,8 +1,7 @@
 # Wiki checkbox task grammar and discovery contract
 
-Status: executable specification for Issue #57. This contract intentionally defines
-input, outputs, identities, and diagnostics before scanner implementation. Issue #58
-may implement it but may not broaden it implicitly.
+Status: executable specification for Issues #57 and #71. This contract intentionally
+defines input, outputs, identities, and diagnostics before scanner implementation.
 
 ## Scope and purity
 
@@ -19,9 +18,10 @@ mutation API, watcher, UI adapter, cache builder, or migration tool.
 The default allowed roots are `01-Projects`, `02-Areas`, and `dailies`. A scanner
 considers only regular UTF-8 `.md` files below those roots, recursively. It must walk
 root-relative POSIX paths in lexical order and process valid or malformed checklist
-lines in increasing one-based line order. Thus externally visible output is ordered by
-**path, then line**, then diagnostic code when two diagnostics have the same source
-location.
+lines in increasing one-based line order. Thus observations are ordered by **path, then line**.
+Diagnostics are ordered by path, line, checkbox-level finding before
+per-link findings, `link_index`, then stable code rank; repeated equal findings retain
+discovery order.
 
 The default exclusions are `03-Research`, `04-Archives`, `assets`, `templates`, hidden
 paths, and any path outside the allowed roots. In addition, a deployment policy may
@@ -57,25 +57,56 @@ outside an unordered-list item is ordinary prose and has no diagnostic. Ordered 
 `*`/`+` bullets, task extensions, HTML checkboxes, and nested non-list syntax are
 unsupported in this phase.
 
-## Optional linked metadata record
+## Supporting links and explicit typed task links
 
-A valid label may contain one ordinary relative Markdown link, for example:
+Every ordinary Markdown link and canonical wiki link in checkbox prose is
+supporting/amplification context, never a typed task record. For example:
 
 ```markdown
-- [ ] [Change brakes](lifeos/tasks/change-brakes.md)
+- [ ] Populate the roster ([source details](trips/26-15.md#key-personnel))
 ```
 
-The checkbox occurrence is the task observation. The destination is optional metadata:
-title/summary/priority may be read only after safe resolution, and no linked record
-changes checkbox state.
+The checkbox label is preserved exactly. Supporting links preserve their authored
+display text, destination, and mixed Markdown/wiki source order. Safe Markdown targets
+resolve relative to the containing checklist file; a safe query and fragment are
+retained on its navigation action. `http(s)` Markdown destinations are literal
+no-fetch external actions. Missing, unsafe, and non-Markdown Markdown destinations
+emit respectively `SUPPORTING_LINK_MISSING`, `SUPPORTING_LINK_UNSAFE`, and
+`SUPPORTING_LINK_NON_MARKDOWN`.
+
+Canonical wiki supporting links use exactly `[[target]]`, `[[target|display text]]`,
+`[[target#anchor]]`, or `[[target#anchor|display text]]`. They are resolved using the
+rendered-source convention: root-relative candidate, source-relative candidate, then
+a unique bare-name match. Extensionless targets are Markdown candidates. They never
+load typed metadata. Invalid, unsafe, missing, and ambiguous wiki targets emit
+`SUPPORTING_WIKI_LINK_MALFORMED`, `SUPPORTING_WIKI_LINK_UNSAFE`,
+`SUPPORTING_WIKI_LINK_MISSING`, or `SUPPORTING_WIKI_LINK_AMBIGUOUS` respectively.
+
+Only an inline Markdown link destination with the exact lowercase raw `task:` prefix
+opts into optional typed metadata:
+
+```markdown
+- [ ] [Change brakes](task:lifeos/tasks/change-brakes.md)
+```
+
+The marker is scanner syntax, not an action URL. It is recognized before percent
+decoding; its payload is decoded exactly once and must be a non-empty relative `.md`
+path. Malformed percent escapes, literal or escaped spaces (use `%20`), absolute or
+scheme/netloc paths, traversal, fragments, and queries are malformed. A label may
+contain zero or one marker. Two or more markers emit
+`TYPED_TASK_LINK_CARDINALITY` and none is selected; a malformed marker emits
+`MALFORMED_TYPED_TASK_LINK` and is not reclassified as supporting. The checkbox
+occurrence remains the task observation; optional typed metadata never changes its
+state.
 
 Link handling is deliberately narrow:
 
-1. Use the link destination only when there is exactly one Markdown link in the label.
-   Fragments and query strings are unsupported for task-record links.
-2. Resolve it relative to the containing checklist file. It must be a relative,
-   root-contained `.md` regular file. Absolute paths, URI schemes, fragments, query
-   strings, and resolution that escapes the configured wiki root are unsafe.
+1. Use typed metadata only when exactly one explicit `task:` destination satisfies this
+   grammar. Fragments and query strings are unsupported for typed-task links.
+2. Resolve the path component relative to the containing checklist file. It must be a
+   relative, root-contained `.md` regular file. Absolute paths, URI schemes, query
+   strings, and resolution that escapes the configured wiki root are unsafe. A fragment
+   is permitted only for an ordinary supporting link and is never used while reading it.
 3. Preserve existing source-safe navigation: use root containment before reading and do
    not follow an escaping symlink. The implementation must not weaken existing
    root-escape, symlink, or permission protections.
@@ -85,8 +116,11 @@ Link handling is deliberately narrow:
    record gives `WRONG_TASK_RECORD_TYPE`; an unsafe destination gives
    `UNSAFE_TASK_LINK`.
 
-A failure to use a link as metadata does not suppress the valid checkbox occurrence.
-The occurrence remains visible as a plain, read-only observation with its diagnostic.
+An exactly-one unmarked Markdown link that safely resolves to a typed-shaped record is
+supporting-only and emits non-fatal `LEGACY_TYPED_TASK_LINK`; it must not load metadata,
+compare state, or emit ordinary typed-record diagnostics. Wiki links never receive the
+legacy diagnostic merely for resembling a task. A failure to use any link as metadata
+does not suppress the valid checkbox occurrence.
 
 ## State, identity, and repeated references
 
@@ -142,12 +176,18 @@ is also reported. A linked record, when valid, carries a separate safe
 `linked_record_path`; its location must never replace the checkbox source locator.
 
 Diagnostics are immutable objects with `code`, `severity` (`warning` for all current
-input findings), `message`, and the source locator. Diagnostics may additionally
-include safe `link_destination` and `linked_record_path` values. They must never put
-host-absolute paths, file contents other than the excerpt, or database identifiers in
-the result. Codes in this phase are `MALFORMED_CHECKBOX`, `UNSAFE_TASK_LINK`,
-`MISSING_TASK_RECORD`, `UNTYPED_TASK_RECORD`, `WRONG_TASK_RECORD_TYPE`,
-`DUPLICATE_LINKED_TASK_RECORD`, and `CHECKBOX_STATUS_DISAGREEMENT`.
+input findings), `message`, and the source locator. Per-link diagnostics additionally
+include their zero-based mixed-source-order `link_index`, `link_kind`, and a literal
+`link_destination` only when safe to disclose. They may include safe
+`linked_record_path` values. They must never put host-absolute paths, file contents
+other than the excerpt, or database identifiers in the result. The complete link codes
+are `TYPED_TASK_LINK_CARDINALITY`, `MALFORMED_TYPED_TASK_LINK`,
+`LEGACY_TYPED_TASK_LINK`, `SUPPORTING_LINK_UNSAFE`, `SUPPORTING_LINK_MISSING`,
+`SUPPORTING_LINK_NON_MARKDOWN`, `SUPPORTING_WIKI_LINK_MALFORMED`,
+`SUPPORTING_WIKI_LINK_UNSAFE`, `SUPPORTING_WIKI_LINK_MISSING`,
+`SUPPORTING_WIKI_LINK_AMBIGUOUS`, `UNSAFE_TASK_LINK`, `MISSING_TASK_RECORD`,
+`UNTYPED_TASK_RECORD`, `WRONG_TASK_RECORD_TYPE`, `DUPLICATE_LINKED_TASK_RECORD`,
+and `CHECKBOX_STATUS_DISAGREEMENT`.
 
 ## Compatibility boundary
 

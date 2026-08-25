@@ -87,9 +87,11 @@ def test_link_metadata_identity_status_and_duplicate_diagnostics_follow_contract
         "source_path": "01-Projects/Alpha/index.md",
         "line": 10,
         "column": 1,
-        "source_excerpt": "- [ ] [Completed record](lifeos/tasks/completed-record.md)",
-        "link_destination": "lifeos/tasks/completed-record.md",
+        "source_excerpt": "- [ ] [Completed record](task:lifeos/tasks/completed-record.md)",
+        "link_destination": "task:lifeos/tasks/completed-record.md",
         "linked_record_path": "01-Projects/Alpha/lifeos/tasks/completed-record.md",
+        "link_index": None,
+        "link_kind": None,
     }
 
 
@@ -100,14 +102,14 @@ def test_unsafe_missing_and_untyped_links_retain_plain_checkbox_observations(tmp
     source.write_text(
         "\n".join(
             (
-                "- [ ] [Escape](../../../../outside.md)",
-                "- [ ] [Absolute](/outside.md)",
-                "- [ ] [URI](https://example.test/task.md)",
-                "- [ ] [Fragment](lifeos/tasks/task.md#part)",
-                "- [ ] [Query](lifeos/tasks/task.md?view=full)",
-                "- [ ] [Missing](lifeos/tasks/missing.md)",
-                "- [ ] [Untyped](lifeos/tasks/untyped.md)",
-                "- [ ] [Wrong](lifeos/tasks/wrong.md)",
+                "- [ ] [Escape](task:../../../../outside.md)",
+                "- [ ] [Absolute](task:/outside.md)",
+                "- [ ] [URI](task:https://example.test/task.md)",
+                "- [ ] [Fragment](task:lifeos/tasks/task.md#part)",
+                "- [ ] [Query](task:lifeos/tasks/task.md?view=full)",
+                "- [ ] [Missing](task:lifeos/tasks/missing.md)",
+                "- [ ] [Untyped](task:lifeos/tasks/untyped.md)",
+                "- [ ] [Wrong](task:lifeos/tasks/wrong.md)",
             )
         ),
         encoding="utf-8",
@@ -122,11 +124,11 @@ def test_unsafe_missing_and_untyped_links_retain_plain_checkbox_observations(tmp
     assert len(result.tasks) == 8
     assert all(task.linked_task_id is None for task in result.tasks)
     assert [diagnostic.code for diagnostic in result.diagnostics] == [
-        "UNSAFE_TASK_LINK",
-        "UNSAFE_TASK_LINK",
-        "UNSAFE_TASK_LINK",
-        "UNSAFE_TASK_LINK",
-        "UNSAFE_TASK_LINK",
+        "MALFORMED_TYPED_TASK_LINK",
+        "MALFORMED_TYPED_TASK_LINK",
+        "MALFORMED_TYPED_TASK_LINK",
+        "MALFORMED_TYPED_TASK_LINK",
+        "MALFORMED_TYPED_TASK_LINK",
         "MISSING_TASK_RECORD",
         "UNTYPED_TASK_RECORD",
         "WRONG_TASK_RECORD_TYPE",
@@ -137,7 +139,7 @@ def test_escaping_symlink_task_link_is_unsafe_without_reading_its_target(tmp_pat
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "index.md"
     source.parent.mkdir(parents=True)
-    source.write_text("- [ ] [Outside](lifeos/tasks/outside.md)\n", encoding="utf-8")
+    source.write_text("- [ ] [Outside](task:lifeos/tasks/outside.md)\n", encoding="utf-8")
     outside = tmp_path / "outside.md"
     outside.write_text("---\nid: tsk-outside\ntype: task\n---\n", encoding="utf-8")
     task_dir = source.parent / "lifeos" / "tasks"
@@ -156,7 +158,7 @@ def test_symlinked_task_link_inside_the_root_is_also_unsafe(tmp_path: Path) -> N
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "index.md"
     source.parent.mkdir(parents=True)
-    source.write_text("- [ ] [Aliased](lifeos/tasks/alias.md)\n", encoding="utf-8")
+    source.write_text("- [ ] [Aliased](task:lifeos/tasks/alias.md)\n", encoding="utf-8")
     task_dir = source.parent / "lifeos" / "tasks"
     task_dir.mkdir(parents=True)
     target = task_dir / "target.md"

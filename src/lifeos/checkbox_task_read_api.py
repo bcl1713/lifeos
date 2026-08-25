@@ -12,6 +12,7 @@ from lifeos.wiki_checkbox_tasks import (
     CheckboxTaskDiagnostic,
     CheckboxTaskScanResult,
     CheckboxTaskSnapshot,
+    SupportingLink,
     scan_checkbox_tasks,
 )
 from lifeos.wiki_links import resolve_wiki_link
@@ -54,6 +55,34 @@ def _source(task: CheckboxTaskSnapshot, repository: WikiRepository) -> dict[str,
     }
 
 
+def _supporting_link(link: SupportingLink, repository: WikiRepository) -> dict[str, object]:
+    if link.classification == "external":
+        url, diagnostic = link.destination, None
+    elif link.path is None:
+        url, diagnostic = None, link.diagnostic
+    else:
+        resolved = _link(link.path, repository)
+        url, diagnostic = resolved["url"], resolved["diagnostic"]
+    if url is not None and link.classification != "external":
+        if link.query is not None:
+            url = f"{url}?{link.query}"
+        anchor = link.anchor or link.fragment
+        if anchor is not None:
+            url = f"{url}#{anchor}"
+    return {
+        "label": link.label,
+        "destination": link.destination,
+        "path": link.path,
+        "url": url,
+        "diagnostic": diagnostic,
+        "kind": link.kind,
+        "link_index": link.link_index,
+        "target": link.target,
+        "anchor": link.anchor,
+        "classification": link.classification,
+    }
+
+
 def _task(task: CheckboxTaskSnapshot, repository: WikiRepository) -> dict[str, object]:
     linked_record = None
     if task.linked_task_path is not None:
@@ -72,6 +101,7 @@ def _task(task: CheckboxTaskSnapshot, repository: WikiRepository) -> dict[str, o
         "identity": task.identity,
         "source": _source(task, repository),
         "linked_record": linked_record,
+        "supporting_links": [_supporting_link(link, repository) for link in task.supporting_links],
     }
 
 
@@ -84,6 +114,8 @@ def _diagnostic(diagnostic: CheckboxTaskDiagnostic, repository: WikiRepository) 
         "severity": diagnostic.severity,
         "message": diagnostic.message,
         "link_destination": diagnostic.link_destination,
+        "link_index": diagnostic.link_index,
+        "link_kind": diagnostic.link_kind,
         "source": {
             "path": diagnostic.source_path,
             "line": diagnostic.line,

@@ -13,6 +13,7 @@
       <div class="muted">Checklist source: {{ task.source.path }}:{{ task.source.line }}:{{ task.source.column }}{% if task.source.url %} · <a href="{{ task.source.url }}">Open checklist source</a>{% else %} · {{ task.source.diagnostic }}{% endif %}</div>
       <div class="muted">{{ task.source.excerpt }}</div>
       {% if task.linked_record %}<div class="muted">Linked task record: {{ task.linked_record.path }}{% if task.linked_record.url %} · <a href="{{ task.linked_record.url }}">Open linked task record</a>{% else %} · {{ task.linked_record.diagnostic }}{% endif %}{% if task.linked_record.summary %} · {{ task.linked_record.summary }}{% endif %}{% if task.linked_record.priority is not none %} · priority {{ task.linked_record.priority }}{% endif %}</div>{% endif %}
+      {% for link in task.supporting_links %}<div class="muted">Supporting link: {{ link.label }}{% if link.url %} · <a href="{{ link.url }}">Open supporting link</a>{% elif link.diagnostic %} · {{ link.diagnostic }}{% endif %}</div>{% endfor %}
     </div>
   </article>
   {% endfor %}{% else %}<p class="empty">No checkbox observations in approved wiki sources.</p>{% endif %}

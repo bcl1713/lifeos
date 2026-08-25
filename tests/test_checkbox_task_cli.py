@@ -28,7 +28,7 @@ def _write_wiki(root: Path) -> None:
     legacy = root / "01-Projects" / "Alpha" / "lifeos" / "tasks" / "legacy.md"
     legacy.parent.mkdir(parents=True)
     source.write_text(
-        "- [ ] [Legacy task](lifeos/tasks/legacy.md)\n- [x] Checklist-only observation\n",
+        "- [ ] [Legacy task](task:lifeos/tasks/legacy.md)\n- [x] Checklist-only observation\n",
         encoding="utf-8",
     )
     legacy.write_text(
@@ -50,12 +50,15 @@ def test_checkbox_scanner_cli_is_deterministic_read_only_and_reports_legacy_meta
     assert first.stdout == second.stdout
     assert _fixture_bytes(wiki) == before
     report = json.loads(first.stdout)
+    for diagnostic in report["diagnostics"]:
+        diagnostic.pop("link_index", None)
+        diagnostic.pop("link_kind", None)
     assert report == {
         "diagnostics": [
             {
                 "code": "CHECKBOX_STATUS_DISAGREEMENT",
                 "column": 1,
-                "link_destination": "lifeos/tasks/legacy.md",
+                "link_destination": "task:lifeos/tasks/legacy.md",
                 "linked_record_path": "01-Projects/Alpha/lifeos/tasks/legacy.md",
                 "line": 1,
                 "message": (
@@ -63,7 +66,7 @@ def test_checkbox_scanner_cli_is_deterministic_read_only_and_reports_legacy_meta
                     "checkbox state remains authoritative."
                 ),
                 "severity": "warning",
-                "source_excerpt": "- [ ] [Legacy task](lifeos/tasks/legacy.md)",
+                "source_excerpt": "- [ ] [Legacy task](task:lifeos/tasks/legacy.md)",
                 "source_path": "01-Projects/Alpha/index.md",
             }
         ],
@@ -75,16 +78,17 @@ def test_checkbox_scanner_cli_is_deterministic_read_only_and_reports_legacy_meta
             {
                 "checked": False,
                 "content_fingerprint": sha256(
-                    b"01-Projects/Alpha/index.md\0- [ ] [Legacy task](lifeos/tasks/legacy.md)"
+                    b"01-Projects/Alpha/index.md\0- [ ] [Legacy task](task:lifeos/tasks/legacy.md)"
                 ).hexdigest(),
                 "identity": "tsk-legacy plus checkbox occurrence locator",
-                "label": "Legacy task",
+                "label": "[Legacy task](task:lifeos/tasks/legacy.md)",
                 "linked_task_id": "tsk-legacy",
                 "linked_task_path": "01-Projects/Alpha/lifeos/tasks/legacy.md",
                 "linked_task_priority": None,
                 "linked_task_summary": "Readable legacy metadata",
                 "linked_task_title": "Legacy task",
-                "source_excerpt": "- [ ] [Legacy task](lifeos/tasks/legacy.md)",
+                "supporting_links": [],
+                "source_excerpt": "- [ ] [Legacy task](task:lifeos/tasks/legacy.md)",
                 "source_path": "01-Projects/Alpha/index.md",
                 "line": 1,
                 "column": 1,
@@ -101,6 +105,7 @@ def test_checkbox_scanner_cli_is_deterministic_read_only_and_reports_legacy_meta
                 "linked_task_priority": None,
                 "linked_task_summary": None,
                 "linked_task_title": None,
+                "supporting_links": [],
                 "source_excerpt": "- [x] Checklist-only observation",
                 "source_path": "01-Projects/Alpha/index.md",
                 "line": 2,

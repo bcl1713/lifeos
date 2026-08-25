@@ -64,6 +64,8 @@ def test_specification_covers_each_fixture_contract_and_safety_boundary() -> Non
         "root containment",
         "MALFORMED_CHECKBOX",
         "UNSAFE_TASK_LINK",
+        "SUPPORTING_LINK_UNSAFE",
+        "SUPPORTING_LINK_MISSING",
         "MISSING_TASK_RECORD",
         "UNTYPED_TASK_RECORD",
         "WRONG_TASK_RECORD_TYPE",
@@ -82,7 +84,7 @@ def test_specification_covers_each_fixture_contract_and_safety_boundary() -> Non
 
     assert {item["code"] for item in manifest["diagnostics"]} == {
         "MALFORMED_CHECKBOX",
-        "UNSAFE_TASK_LINK",
+        "SUPPORTING_LINK_UNSAFE",
         "MISSING_TASK_RECORD",
         "UNTYPED_TASK_RECORD",
         "WRONG_TASK_RECORD_TYPE",
@@ -96,8 +98,8 @@ def test_specification_covers_each_fixture_contract_and_safety_boundary() -> Non
         "message": "Checkbox is open but linked task record status is completed; checkbox state remains authoritative.",
         "source_path": "01-Projects/Alpha/index.md",
         "line": 10,
-        "source_line": "- [ ] [Completed record](lifeos/tasks/completed-record.md)",
-        "link_destination": "lifeos/tasks/completed-record.md",
+        "source_line": "- [ ] [Completed record](task:lifeos/tasks/completed-record.md)",
+        "link_destination": "task:lifeos/tasks/completed-record.md",
         "linked_record_path": "01-Projects/Alpha/lifeos/tasks/completed-record.md",
     }
     assert any(item["linked_task_id"] is None for item in manifest["tasks"])
