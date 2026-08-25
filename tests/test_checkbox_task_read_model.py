@@ -26,7 +26,7 @@ def _write_wiki(wiki: Path) -> None:
         "\n".join(
             (
                 "- [x] Completed first",
-                "- [ ] [Linked second](lifeos/tasks/linked.md)",
+                "- [ ] [Linked second](task:lifeos/tasks/linked.md)",
                 "- [ ] Plain third",
             )
         ),
@@ -57,7 +57,7 @@ def test_versioned_checkbox_read_api_is_authenticated_scanner_authoritative_and_
 
     assert response.status_code == 200
     payload = response.json()
-    assert [task["label"] for task in payload["tasks"]] == ["Completed first", "Linked second", "Plain third"]
+    assert [task["label"] for task in payload["tasks"]] == ["Completed first", "[Linked second](task:lifeos/tasks/linked.md)", "Plain third"]
     assert [task["source"]["line"] for task in payload["tasks"]] == [1, 2, 3]
     assert payload["tasks"][0]["checked"] is True
     linked = payload["tasks"][1]
@@ -65,7 +65,7 @@ def test_versioned_checkbox_read_api_is_authenticated_scanner_authoritative_and_
         "path": "01-Projects/Alpha/index.md",
         "line": 2,
         "column": 1,
-        "excerpt": "- [ ] [Linked second](lifeos/tasks/linked.md)",
+        "excerpt": "- [ ] [Linked second](task:lifeos/tasks/linked.md)",
         "url": "/sources/wiki/01-Projects/Alpha/index.md",
         "diagnostic": None,
     }
@@ -83,7 +83,7 @@ def test_versioned_checkbox_read_api_is_authenticated_scanner_authoritative_and_
 
     open_tasks = client.get("/api/v1/checkbox-tasks", params={"state": "open"}).json()["tasks"]
     checked_tasks = client.get("/api/v1/checkbox-tasks", params={"state": "checked"}).json()["tasks"]
-    assert [task["label"] for task in open_tasks] == ["Linked second", "Plain third"]
+    assert [task["label"] for task in open_tasks] == ["[Linked second](task:lifeos/tasks/linked.md)", "Plain third"]
     assert [task["label"] for task in checked_tasks] == ["Completed first"]
 
 
@@ -159,15 +159,15 @@ def test_unsafe_link_is_not_clickable_and_is_reported_in_api_and_html(tmp_path: 
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "index.md"
     source.parent.mkdir(parents=True)
-    source.write_text("- [ ] [Unsafe](../../outside.md)\n", encoding="utf-8")
+    source.write_text("- [ ] [Unsafe](task:../../outside.md)\n", encoding="utf-8")
     client = _client(tmp_path, wiki)
 
     payload = client.get("/api/v1/checkbox-tasks").json()
     assert payload["tasks"][0]["linked_record"] is None
-    assert payload["diagnostics"][0]["code"] == "UNSAFE_TASK_LINK"
+    assert payload["diagnostics"][0]["code"] == "MALFORMED_TYPED_TASK_LINK"
     assert payload["diagnostics"][0]["link_destination"] is None
 
     page = client.get("/tasks")
-    assert "UNSAFE_TASK_LINK" in page.text
+    assert "MALFORMED_TYPED_TASK_LINK" in page.text
     assert "Open linked task record" not in page.text
     assert 'href="../../outside.md"' not in page.text

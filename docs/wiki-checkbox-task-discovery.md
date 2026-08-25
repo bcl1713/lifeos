@@ -36,6 +36,38 @@ is shown only when that target resolves safely. Unsafe, missing, untyped, or
 wrong-type targets remain non-clickable and appear as scanner diagnostics; they
 do not hide a valid checkbox occurrence.
 
+### Checkbox links: context versus typed metadata
+
+Ordinary Markdown links and canonical wiki links in a checkbox label are
+supporting context. LifeOS preserves the checkbox label and exposes each safe
+supporting link separately in authored mixed-link source order. A safe relative
+Markdown target may retain its query and fragment for its navigation action;
+an `http` or `https` target is a literal external action. LifeOS does not fetch
+external destinations. Canonical wiki forms are `[[target]]`,
+`[[target|display]]`, `[[target#anchor]]`, and
+`[[target#anchor|display]]`; their resolution follows rendered-source
+navigation (root-relative, source-relative, then a unique bare-name match).
+Supporting links never load typed task metadata.
+
+Only an inline Markdown destination with the exact lowercase raw prefix
+`task:` opts into typed metadata, for example
+`[Change brakes](task:lifeos/tasks/change-brakes.md)`. The scanner recognizes
+the marker before decoding its payload, decodes that payload exactly once, and
+requires a non-empty relative Markdown path. Encode a path space as `%20`; it
+then becomes a path space after that one decode. A raw literal space, malformed
+percent escape, traversal, absolute or
+scheme/netloc paths, queries, and fragments are malformed. A checkbox may have
+zero or one such marker. Multiple markers emit `TYPED_TASK_LINK_CARDINALITY`;
+a malformed marker emits `MALFORMED_TYPED_TASK_LINK`; neither selects metadata.
+
+An unmarked Markdown link that safely resolves to a typed-shaped task record is
+still supporting context. It produces the non-fatal `LEGACY_TYPED_TASK_LINK`
+diagnostic and does not load the record, compare status, or turn the checkbox
+into a typed task. Invalid, unsafe, missing, ambiguous, and non-Markdown
+supporting targets similarly remain visible context with their applicable
+diagnostic. No link diagnostic removes the checkbox observation or causes an
+automatic repair.
+
 The source-navigation safety contract is the same one used elsewhere in LifeOS:
 links must remain under the configured wiki root and cannot traverse an escaping
 symlink. With no `LIFEOS_SILVERBULLET_BASE_URL`, links remain on LifeOS's
@@ -107,9 +139,15 @@ state or source diagnostic requires correction.
 `GET /api/v1/checkbox-tasks` is authenticated and returns JSON with `tasks`,
 `diagnostics`, and the effective scan `policy`. It accepts `state=all` (the
 default), `state=open`, or `state=checked`. The response is constructed from a
-fresh canonical scanner result, never a SQL fallback. A successful scan of a
-configured but empty wiki is normal: the browser routes return HTTP `200` with
-the appropriate empty state and the API returns HTTP `200` with `tasks: []`.
+fresh canonical scanner result, never a SQL fallback. Each task's additive
+`supporting_links` list preserves link source order and provides its kind,
+zero-based `link_index`, authored destination/display information, safe
+resolved path/navigation action when available, classification, and diagnostic.
+Per-link diagnostics likewise identify `link_index` and `link_kind`; existing
+task, source, linked-record, and policy fields remain additive/compatible.
+A successful scan of a configured but empty wiki is normal: the browser routes
+return HTTP `200` with the appropriate empty state and the API returns HTTP
+`200` with `tasks: []`.
 
 Use this read-only inspection sequence after the merged build is deployed to a
 non-production test environment or during an approved operational verification:

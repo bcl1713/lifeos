@@ -1,3 +1,3 @@
 # Home
 
-- [ ] [No metadata](lifeos/tasks/no-frontmatter.md)
+- [ ] [No metadata](task:lifeos/tasks/no-frontmatter.md)
