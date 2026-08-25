@@ -153,7 +153,7 @@ def _markdown_files(root: Path, allowed_roots: tuple[str, ...], exclusions: tupl
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
 
 
-def _is_safe_link_destination(destination: str) -> bool:
+def _is_safe_link_path(destination: str) -> bool:
     parsed = urlparse(destination)
     return not (
         destination.startswith("/")
@@ -162,8 +162,11 @@ def _is_safe_link_destination(destination: str) -> bool:
         or parsed.query
         or parsed.fragment
         or ".." in Path(destination).parts
-        or Path(destination).suffix.casefold() != ".md"
     )
+
+
+def _is_safe_link_destination(destination: str) -> bool:
+    return _is_safe_link_path(destination) and Path(destination).suffix.casefold() == ".md"
 
 
 def _linked_metadata(root: Path, source: Path, destination: str) -> tuple[_LinkedMetadata | None, str | None]:
@@ -212,7 +215,7 @@ def _supporting_link(
     parsed = urlparse(destination)
     if parsed.scheme in {"http", "https"}:
         return SupportingLink(label, destination, None, kind="markdown", classification="external"), None
-    if not parsed.path or not _is_safe_link_destination(parsed.path) or parsed.scheme or parsed.netloc:
+    if not parsed.path or not _is_safe_link_path(parsed.path) or parsed.scheme or parsed.netloc:
         return SupportingLink(label, destination, None, kind="markdown", classification="unsafe"), "SUPPORTING_LINK_UNSAFE"
     if Path(parsed.path).suffix.casefold() != ".md":
         return SupportingLink(label, destination, None, kind="markdown", classification="non_markdown"), "SUPPORTING_LINK_NON_MARKDOWN"

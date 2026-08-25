@@ -171,6 +171,22 @@ def test_markdown_supporting_link_preserves_query_and_fragment_in_safe_api_actio
     assert supporting["url"] == "/sources/wiki/01-Projects/Alpha/brief.md?view=review#scope"
 
 
+def test_non_markdown_supporting_link_has_a_non_fatal_diagnostic(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    source = wiki / "01-Projects" / "Alpha" / "index.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("- [ ] [PDF](brief.pdf)\n", encoding="utf-8")
+
+    result = scan_checkbox_tasks(wiki)
+
+    supporting = result.tasks[0].supporting_links[0]
+    assert supporting.classification == "non_markdown"
+    assert supporting.path is None
+    assert supporting.diagnostic == "Supporting link target is not Markdown."
+    assert [diagnostic.code for diagnostic in result.diagnostics] == ["SUPPORTING_LINK_NON_MARKDOWN"]
+    assert result.diagnostics[0].severity == "warning"
+
+
 def test_checkbox_level_cardinality_diagnostic_precedes_same_line_link_diagnostics(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "index.md"
