@@ -163,6 +163,41 @@ class WikiRepository:
             target = (self.root / owner.path).parent / "tasks" / f"{slugify(title)}-{record_id}.md"
         return target.relative_to(self.root).as_posix()
 
+    def task_location(self, owner: WikiRecord | None, path: str, record_id: str) -> str:
+        """Preflight an explicit new task record location owned by a Project or Area."""
+        if owner is None or owner.record_type not in {"project", "area"}:
+            raise WikiConflictError("explicit task location requires a Project or Area owner")
+        requested = Path(path)
+        if requested.is_absolute() or ".." in requested.parts:
+            raise WikiConflictError("explicit task location escapes the owning document set")
+        if requested.suffix.casefold() != ".md":
+            raise WikiConflictError("explicit task location must be Markdown")
+        raw_target = self.root / requested
+        for candidate in (raw_target, *raw_target.parents):
+            if candidate == self.root.parent:
+                break
+            if candidate.is_symlink():
+                raise WikiConflictError("explicit task location must not traverse symlinks")
+            if candidate == self.root:
+                break
+        target = raw_target.resolve()
+        owner_root = (self.root / owner.path).resolve().parent
+        try:
+            target.relative_to(self.root)
+            target.relative_to(owner_root)
+        except ValueError as exc:
+            raise WikiConflictError("explicit task location must remain within the owning document set") from exc
+        if target.exists():
+            existing = self.read(target.relative_to(self.root).as_posix())
+            raise WikiConflictError(f"explicit task location already contains a {existing.record_type} record")
+        try:
+            existing_identity = self.find_by_id(record_id)
+        except ValueError as exc:
+            raise WikiConflictError(str(exc)) from exc
+        if existing_identity is not None:
+            raise WikiConflictError("canonical task identity is already owned")
+        return target.relative_to(self.root).as_posix()
+
     def _atomic_write(self, target: Path, text: str) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         existing_stat = target.stat() if target.exists() else None
