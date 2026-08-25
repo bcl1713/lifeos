@@ -127,6 +127,28 @@ def test_explicit_task_destination_is_the_only_typed_marker_and_wiki_links_are_s
     }
 
 
+def test_explicit_typed_task_link_decodes_a_percent_encoded_space_once(tmp_path: Path) -> None:
+    wiki = tmp_path / "wiki"
+    source = wiki / "01-Projects" / "Alpha" / "index.md"
+    typed = source.parent / "lifeos" / "tasks" / "change brakes.md"
+    for path in (source, typed):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "- [ ] [Change brakes](task:lifeos/tasks/change%20brakes.md)\n",
+        encoding="utf-8",
+    )
+    typed.write_text(
+        "---\nid: tsk-change-brakes\ntype: task\ntitle: Change brakes\nstatus: open\n---\n",
+        encoding="utf-8",
+    )
+
+    result = scan_checkbox_tasks(wiki)
+
+    assert result.tasks[0].linked_task_id == "tsk-change-brakes"
+    assert result.tasks[0].linked_task_path == "01-Projects/Alpha/lifeos/tasks/change brakes.md"
+    assert result.diagnostics == ()
+
+
 def test_wiki_supporting_links_preserve_safe_and_unsafe_outcomes_without_typed_inference(tmp_path: Path) -> None:
     wiki = tmp_path / "wiki"
     source = wiki / "01-Projects" / "Alpha" / "mission" / "index.md"

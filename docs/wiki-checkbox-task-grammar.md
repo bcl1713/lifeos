@@ -91,7 +91,8 @@ opts into optional typed metadata:
 
 The marker is scanner syntax, not an action URL. It is recognized before percent
 decoding; its payload is decoded exactly once and must be a non-empty relative `.md`
-path. Malformed percent escapes, literal or escaped spaces (use `%20`), absolute or
+path. Encode a path space as `%20`, which becomes a path space after that one
+decode. Raw literal spaces, malformed percent escapes, absolute or
 scheme/netloc paths, traversal, fragments, and queries are malformed. A label may
 contain zero or one marker. Two or more markers emit
 `TYPED_TASK_LINK_CARDINALITY` and none is selected; a malformed marker emits

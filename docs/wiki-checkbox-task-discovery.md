@@ -53,8 +53,9 @@ Only an inline Markdown destination with the exact lowercase raw prefix
 `task:` opts into typed metadata, for example
 `[Change brakes](task:lifeos/tasks/change-brakes.md)`. The scanner recognizes
 the marker before decoding its payload, decodes that payload exactly once, and
-requires a non-empty relative Markdown path. Encode a space as `%20`; literal
-or escaped spaces, malformed percent escapes, traversal, absolute or
+requires a non-empty relative Markdown path. Encode a path space as `%20`; it
+then becomes a path space after that one decode. A raw literal space, malformed
+percent escape, traversal, absolute or
 scheme/netloc paths, queries, and fragments are malformed. A checkbox may have
 zero or one such marker. Multiple markers emit `TYPED_TASK_LINK_CARDINALITY`;
 a malformed marker emits `MALFORMED_TYPED_TASK_LINK`; neither selects metadata.

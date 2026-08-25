@@ -363,7 +363,7 @@ def scan_checkbox_tasks(
                     malformed_typed = True
                 else:
                     decoded_payload = unquote(raw_payload)
-                    if " " in decoded_payload or not _is_safe_link_destination(decoded_payload):
+                    if not _is_safe_link_destination(decoded_payload):
                         malformed_typed = True
                     else:
                         linked, link_code = _linked_metadata(root, source, decoded_payload)

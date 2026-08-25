@@ -62,8 +62,9 @@ repair mechanism.
 For a checkbox that should expose typed task metadata, use exactly one inline
 Markdown destination beginning with lowercase `task:`, such as
 `[Change brakes](task:lifeos/tasks/change-brakes.md)`. The marker is recognized
-before its path payload is decoded once; encode path spaces as `%20`. Do not use
-uppercase `TASK:`, literal/escaped spaces, malformed percent escapes, queries,
+before its path payload is decoded once; encode a path space as `%20`, which
+then becomes a path space after that one decode. Do not use uppercase `TASK:`,
+raw literal spaces, malformed percent escapes, queries,
 fragments, absolute paths, schemes, or traversal. These forms are diagnostics,
 not an operator repair request, and they do not make the scanner write source.
 Two markers produce `TYPED_TASK_LINK_CARDINALITY`; a malformed marker produces
